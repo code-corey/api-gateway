@@ -23,7 +23,7 @@
 - [安全基线](#安全基线)
 - [部署架构](#部署架构)
 - [测试策略](#测试策略)
-- [分阶段交付计划](#分阶段交付计划)
+- [分阶段实施计划（Stage 0~12）](#分阶段实施计划stage-012)
 - [风险与应对](#风险与应对)
 - [仓库状态](#仓库状态)
 
@@ -485,32 +485,223 @@ Admin API 接收上传
 
 ---
 
-## 分阶段交付计划
+## 分阶段实施计划（Stage 0~12）
 
-### Phase 1 — 核心可运行（预计 2~3 周）
+从**最小可运行**例子开始，每个 Stage 在上一个基础上只推进一步，独立命名、可单独验收，最终达到 README 前文描述的完整生产能力。
 
-- [ ] Maven 多模块骨架 + CI（GitHub Actions: build / test / package）
-- [ ] `gateway-api` SPI 接口定义
-- [ ] `gateway-core` 基础路由 + AuthPluginFilter
-- [ ] PluginManager 热加载 / 卸载 / 原子切换
-- [ ] `plugin-jwt` v1.0（RS256 + JWKS + Claims 转发）
-- [ ] Admin 上传 / 激活 / 查询 API（单节点）
-- [ ] Docker Compose 本地联调环境
+### 总体路线图
 
-### Phase 2 — 集群与运维（预计 1~2 周）
+```
+Stage 0 ──▶ Stage 1 ──▶ Stage 2 ──▶ ... ──▶ Stage 12
+ 骨架         最小网关      硬编码认证        生产级集群热部署
+```
 
-- [ ] Plugin Registry 持久化（MySQL）
-- [ ] Redis 集群同步 reload
-- [ ] 节点状态上报 + 一键回滚
-- [ ] Prometheus 指标 + Grafana 面板
-- [ ] Helm Chart + 健康/就绪探针
+| 原则 | 说明 |
+|------|------|
+| 每阶段可运行 | 每个 Stage 结束都能启动、演示、验收 |
+| 只加一个主题 | 每阶段只解决 1 个核心问题 |
+| 可命名 | 每个 Stage 有工程名，建议分支 `stage/0N-xxx`、标签 `v0.N-stage0N` |
+| 可回退 | 任一阶段出问题，可停在上一阶段继续 |
 
-### Phase 3 — 生产加固（预计 1 周）
+### 三个里程碑
 
-- [ ] 插件 GPG / 内部 CA 签名校验
-- [ ] Admin RBAC + 审计日志
-- [ ] Canary 发布（可选）
-- [ ] 压测报告 + 运维 Runbook
+| 里程碑 | Stage 范围 | 目标 |
+|--------|------------|------|
+| **A — 理解网关** | 0 ~ 4 | 网关怎么转发、怎么验 JWT |
+| **B — 插件热部署** | 5 ~ 10 | 认证插件化、不重启替换（核心价值） |
+| **C — 生产化** | 11 ~ 12 | 多节点、监控、安全、部署 |
+
+### 阶段总览
+
+| Stage | 工程名 | 一句话 | 新增能力 | 状态 |
+|-------|--------|--------|----------|------|
+| 0 | `api-gateway-bootstrap` | 项目能编译启动 | Maven 骨架 | ✅ 已完成 |
+| 1 | `minimal-gateway` | 能转发请求 | 静态路由 | ⏳ 待开发 |
+| 2 | `gateway-with-hardcoded-auth` | 能拦截未认证请求 | GlobalFilter | ⏳ 待开发 |
+| 3 | `gateway-with-static-jwt` | 能验 JWT | RS256 本地公钥 | ⏳ 待开发 |
+| 4 | `gateway-with-jwks` | 能从远端拉公钥 | JWKS 缓存 | ⏳ 待开发 |
+| 5 | `gateway-plugin-api` | 认证逻辑有接口 | `AuthPlugin` SPI | ⏳ 待开发 |
+| 6 | `gateway-jwt-plugin-jar` | JWT 变独立 JAR | `plugin-jwt` 模块 | ⏳ 待开发 |
+| 7 | `gateway-plugin-manager-cold` | 启动时加载插件 | PluginManager | ⏳ 待开发 |
+| 8 | `gateway-plugin-hotdeploy-single` | 不重启换插件 | 热部署核心 | ⏳ 待开发 |
+| 9 | `gateway-admin-api-single` | HTTP 上传插件 | Admin API | ⏳ 待开发 |
+| 10 | `gateway-plugin-rollback` | 能回滚 | 版本管理 | ⏳ 待开发 |
+| 11 | `gateway-plugin-cluster` | 多节点同步 | MySQL + Redis + MinIO | ⏳ 待开发 |
+| 12 | `api-gateway-production` | 生产可用 | 安全 / 监控 / 部署 | ⏳ 待开发 |
+
+**合计预估工期：约 14~16 天**
+
+---
+
+### Stage 0 — 工程骨架 `api-gateway-bootstrap`
+
+**目标：** 空项目能编译、能启动，还没有业务逻辑。
+
+| 项 | 内容 |
+|----|------|
+| 做什么 | Maven 父 POM + `gateway-core` 空模块 |
+| 技术点 | Java 17、Spring Boot 3、依赖版本统一管理 |
+| 验收标准 | `mvn clean package` 成功；启动后 `/actuator/health` 返回 UP |
+| 不做 | 路由、插件、JWT |
+
+---
+
+### Stage 1 — 最小网关 `minimal-gateway`
+
+**目标：** 真正能转发请求的网关。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 0 |
+| 做什么 | 配置 1 条静态路由：`/api/**` → `http://localhost:8081` |
+| 验收标准 | 启动 mock 后端；访问网关能拿到下游响应 |
+
+---
+
+### Stage 2 — 硬编码认证 `gateway-with-hardcoded-auth`
+
+**目标：** 理解认证如何在 Filter 链拦截请求。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 1 |
+| 做什么 | `GlobalFilter` 检查 `Authorization: Bearer <token>` |
+| 验收标准 | 无 Token → 401；固定测试 Token → 200 |
+
+---
+
+### Stage 3 — JWT 硬编码版 `gateway-with-static-jwt`
+
+**目标：** 用真实 JWT 替换固定 Token。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 2 |
+| 做什么 | `nimbus-jose-jwt` 校验 JWT（本地公钥文件） |
+| 验收标准 | 合法 JWT 通过；过期 / 伪造 JWT 拒绝 |
+
+---
+
+### Stage 4 — JWKS 支持 `gateway-with-jwks`
+
+**目标：** 从远端 Auth 服务拉取公钥。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 3 |
+| 做什么 | JWKS 拉取与缓存，支持 `kid` 匹配 |
+| 验收标准 | mock-jwks-server 换 key 后网关自动用新公钥验签 |
+
+---
+
+### Stage 5 — 插件接口层 `gateway-plugin-api`
+
+**目标：** 定义认证插件契约，从 core 抽离接口。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 4 |
+| 做什么 | 新建 `gateway-api` 模块，定义 `AuthPlugin` SPI |
+| 验收标准 | core 通过接口调用认证，行为与 Stage 4 一致 |
+
+---
+
+### Stage 6 — 插件独立打包 `gateway-jwt-plugin-jar`
+
+**目标：** JWT 认证打成独立 JAR，启动时静态加载。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 5 |
+| 做什么 | 新建 `plugin-jwt` 模块，打包到 `plugins/` 目录 |
+| 验收标准 | 启动时加载 JAR，认证行为不变 |
+
+---
+
+### Stage 7 — 冷加载插件管理器 `gateway-plugin-manager-cold`
+
+**目标：** PluginManager 统一管理插件生命周期。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 6 |
+| 做什么 | `PluginManager` + `PluginClassLoader` + SPI 发现 |
+| 验收标准 | 启动扫描 `plugins/` 并加载；Filter 通过 Manager 获取插件 |
+
+---
+
+### Stage 8 — 插件热部署（单节点）`gateway-plugin-hotdeploy-single`
+
+**目标：** 不重启替换插件（核心能力）。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 7 |
+| 做什么 | 新 ClassLoader → init → 原子切换 → destroy 旧插件 |
+| 验收标准 | 运行中替换 JAR 无需重启；in-flight 请求不中断 |
+
+---
+
+### Stage 9 — 管理 API（单节点）`gateway-admin-api-single`
+
+**目标：** 通过 HTTP 上传并激活插件。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 8 |
+| 做什么 | `POST /admin/plugins/upload`、查询、激活接口 |
+| 验收标准 | curl 上传 JAR 后立即生效 |
+
+---
+
+### Stage 10 — 回滚与版本管理 `gateway-plugin-rollback`
+
+**目标：** 插件异常时可回退。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 9 |
+| 做什么 | 保留最近 N 个版本，一键回滚 |
+| 验收标准 | 激活 v2 后回滚 v1，无需重启 |
+
+---
+
+### Stage 11 — 持久化与集群同步 `gateway-plugin-cluster`
+
+**目标：** 多实例一次发布、全集群生效。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 10 |
+| 做什么 | MySQL 元数据 + MinIO 存储 + Redis Pub/Sub 广播 |
+| 验收标准 | 3 个实例上传一次插件，全部切换到新版本 |
+
+---
+
+### Stage 12 — 生产加固 `api-gateway-production`
+
+**目标：** 达到前文描述的生产级能力。
+
+| 项 | 内容 |
+|----|------|
+| 依赖 | Stage 11 |
+| 包含 | Admin 鉴权、插件签名校验、审计日志、Prometheus、动态路由、限流熔断、Docker / Helm、Runbook、压测 |
+
+---
+
+### Git 策略（建议）
+
+```bash
+# 每完成一个 Stage
+git checkout -b stage/08-hotdeploy-single
+# ... 开发与验收 ...
+git tag v0.8-stage08
+git push origin stage/08-hotdeploy-single --tags
+
+# 验收通过后合并 main
+git checkout main
+git merge stage/08-hotdeploy-single
+```
 
 ---
 
@@ -532,7 +723,8 @@ Admin API 接收上传
 |----|------|
 | 需求文档 | ✅ 本文档 |
 | 架构设计 | ✅ 本文档 |
-| 代码实现 | ⏳ 待开发（回复「开始编码」后启动 Phase 1） |
+| Stage 0 工程骨架 | ✅ 已完成 |
+| Stage 1 ~ 12 | ⏳ 待开发 |
 | CI/CD | ⏳ 待开发 |
 | 部署配置 | ⏳ 待开发 |
 
