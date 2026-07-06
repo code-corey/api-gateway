@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * API 网关主应用入口。
  * <p>
- * Stage 1 在 Stage 0 基础上接入 Spring Cloud Gateway，将 /api/** 请求转发到下游服务。
+ * Stage 2 在 Stage 1 基础上增加硬编码 Bearer Token 认证 GlobalFilter。
  * </p>
  */
 @SpringBootApplication

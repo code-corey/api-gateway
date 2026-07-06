@@ -14,6 +14,13 @@ spring:
           filters:
             - StripPrefix=1
 
+gateway:
+  auth:
+    enabled: true
+    token: test-token-123
+    exclude-paths:
+      - /actuator/**
+
 management:
   endpoints:
     web:

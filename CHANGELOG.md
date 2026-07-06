@@ -41,8 +41,9 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 |-------|--------|------------|------|------|
 | 0 | `api-gateway-bootstrap` | Maven 多模块 + Spring Boot 启动 | `9fc87b3` | ✅ |
 | 1 | `minimal-gateway` | Spring Cloud Gateway 静态路由 | `f49634c` | ✅ |
-| 2 | `gateway-with-hardcoded-auth` | Filter 链拦截请求 | — | ⏳ |
-| 3 ~ 12 | … | 见 README | — | ⏳ |
+| 2 | `gateway-with-hardcoded-auth` | GlobalFilter 硬编码认证 | — | ✅ |
+| 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | — | ⏳ |
+| 4 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
 
@@ -482,6 +483,239 @@ A：Zuul 1.x 基于 Servlet，已偏旧；Spring Cloud Gateway 基于 WebFlux，
 
 ---
 
+# Stage 2 — 硬编码认证
+
+**工程名：** `gateway-with-hardcoded-auth`  
+**提交：** 待 push · 2026-07-06  
+**一句话：** 在路由转发之前拦截请求——没带 Token 的，一律 401。
+
+---
+
+## 学习目标
+
+学完本 Stage，你应该能够：
+
+1. 理解 Spring Cloud Gateway 的 **GlobalFilter** 与过滤器链执行顺序
+2. 实现一个检查 `Authorization: Bearer <token>` 的认证过滤器
+3. 配置路径白名单（如 `/actuator/**` 免认证）
+4. 用 `WebTestClient` 编写网关认证相关的集成测试
+
+---
+
+## 为什么要做这个 Stage
+
+Stage 1 的网关谁都能访问——这在生产里不可接受。  
+但直接上 JWT、插件热部署太复杂，所以 Stage 2 先用**固定 Token** 把「认证挂在 Filter 链上」这件事练熟：
+
+```
+请求 → 认证 Filter → 路由转发 → 下游
+         ↑
+      本 Stage 只加这一层
+```
+
+后面 Stage 3 把「固定 Token」换成 JWT，Stage 5 以后再把认证逻辑抽成插件——**Filter 的位置不变**。
+
+---
+
+## 核心概念
+
+### 1. GlobalFilter vs GatewayFilter
+
+| 类型 | 作用范围 | 本 Stage |
+|------|----------|----------|
+| **GlobalFilter** | 对所有路由生效 | ✅ 使用 |
+| **GatewayFilter** | 仅绑定某条路由 | 未使用 |
+
+认证通常用 GlobalFilter——所有业务 API 都要验，而不是只保护某一条路。
+
+### 2. 过滤器链与 Order
+
+```
+请求进入
+  → GlobalFilter (order 越小越先执行)
+  → 路由匹配
+  → 路由级 Filter
+  → 转发下游
+```
+
+本实现 `getOrder() = HIGHEST_PRECEDENCE`，保证**先认证、后路由**。
+
+### 3. Bearer Token 格式
+
+```
+Authorization: Bearer test-token-123
+               ────── ──────────────
+               固定前缀   Token 值（本 Stage 写死在配置里）
+```
+
+### 4. 请求全链路（Stage 2）
+
+```
+客户端  GET /api/hello
+  │     Authorization: Bearer test-token-123
+  ▼
+HardcodedAuthGlobalFilter
+  │  白名单？→ 跳过
+  │  Token 合法？→ 否：401 JSON
+  ▼ 是
+路由 api-route → mock-backend
+```
+
+---
+
+## 实现步骤（我们做了什么）
+
+| 步骤 | 动作 |
+|------|------|
+| 1 | 新增 `GatewayAuthProperties`，绑定 `gateway.auth.*` 配置 |
+| 2 | 实现 `HardcodedAuthGlobalFilter`（GlobalFilter + Ordered） |
+| 3 | `application.yml` 配置 token、白名单路径 |
+| 4 | 新增 `GatewayAuthWebTests` 集成测试 |
+| 5 | 更新 README / 本教学日志 |
+
+---
+
+## 代码解读
+
+### 配置项
+
+```yaml
+gateway:
+  auth:
+    enabled: true
+    token: test-token-123
+    exclude-paths:
+      - /actuator/**
+```
+
+| 配置 | 含义 |
+|------|------|
+| `enabled` | 总开关，方便本地调试时关闭认证 |
+| `token` | 允许的 Bearer Token 值（教学用硬编码） |
+| `exclude-paths` | Ant 风格路径白名单 |
+
+### 过滤器核心逻辑
+
+```java
+@Override
+public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+    if (!authProperties.isEnabled()) {
+        return chain.filter(exchange);
+    }
+    if (isExcluded(path)) {
+        return chain.filter(exchange);
+    }
+    if (!isValidToken(authorization)) {
+        return unauthorized(exchange);  // 401 + JSON
+    }
+    return chain.filter(exchange);
+}
+```
+
+### 401 响应体
+
+```json
+{"code":401,"message":"未认证，请提供有效的 Bearer Token"}
+```
+
+统一 JSON 格式，方便前端和 API 调用方处理。
+
+---
+
+## 动手实验
+
+```bash
+# 先启动下游和网关（同 Stage 1）
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+
+# 实验 1：无 Token → 401
+curl -i http://localhost:8080/api/hello
+
+# 实验 2：错误 Token → 401
+curl -i -H "Authorization: Bearer wrong" http://localhost:8080/api/hello
+
+# 实验 3：正确 Token → 200 + 下游 JSON
+curl -H "Authorization: Bearer test-token-123" http://localhost:8080/api/hello
+
+# 实验 4：健康检查免认证
+curl http://localhost:8080/actuator/health
+```
+
+### 思考题
+
+1. 如果把 `gateway.auth.enabled` 设为 `false`，行为会怎样？
+2. 为什么 Actuator 必须放白名单？不放会怎样？
+3. 硬编码 Token 在生产环境有什么问题？（提示：Stage 3 JWT）
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | 全部测试通过 |
+| 2 | 无 Token 访问 `/api/hello` | HTTP 401 |
+| 3 | 错误 Token | HTTP 401 |
+| 4 | 正确 Token | 返回下游 JSON |
+| 5 | `/actuator/health` 无 Token | HTTP 200 |
+
+---
+
+## 变更记录
+
+### 新增文件
+
+| 路径 | 说明 |
+|------|------|
+| `gateway-core/.../auth/GatewayAuthProperties.java` | 认证配置绑定 |
+| `gateway-core/.../auth/GatewayAuthConfiguration.java` | 启用配置属性 |
+| `gateway-core/.../auth/HardcodedAuthGlobalFilter.java` | 认证全局过滤器 |
+| `gateway-core/.../auth/GatewayAuthWebTests.java` | 认证集成测试 |
+
+### 修改文件
+
+| 路径 | 说明 |
+|------|------|
+| `gateway-core/.../application.yml` | +`gateway.auth` 配置块 |
+| `gateway-core/.../GatewayApplication.java` | 更新 Stage 注释 |
+| `README.md` | Stage 2 标记完成 |
+
+### Stage 1 → Stage 2 对比
+
+| 维度 | Stage 1 | Stage 2 |
+|------|---------|---------|
+| 认证 | 无 | Bearer Token 硬编码 |
+| 过滤器 | 仅路由内置 Filter | +GlobalFilter |
+| `/api/hello` 无 Token | 200（能转发） | 401 |
+| 测试 | 上下文加载 | +WebTestClient 认证测试 |
+
+---
+
+## 常见问题
+
+**Q：带了正确 Token 却返回 502/500**  
+A：认证已通过，是下游 `mock-backend` 没启动。401 才是认证问题。
+
+**Q：Token 配置了但还是 401**  
+A：检查 Header 格式必须是 `Bearer ` + 空格 + token，大小写敏感。
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| GlobalFilter | 全局生效，适合做认证 |
+| 执行顺序 | 认证要在路由转发之前 |
+| 白名单 | 健康检查等路径不能误拦 |
+| 硬编码 Token | 仅教学用，生产要用 JWT / 插件 |
+| Stage 2 不做 | JWT 解析、插件化——Stage 3 开始 |
+
+**下一课预告（Stage 3）：** 把固定 Token 换成真正的 JWT 验签。
+
+---
+
 # 附录
 
 ## Git 提交记录
@@ -491,12 +725,12 @@ A：Zuul 1.x 基于 Servlet，已偏旧；Spring Cloud Gateway 基于 WebFlux，
 | 1 | `8b082f5` | 需求与架构文档 | 文档 |
 | 2 | `9fc87b3` | Maven 骨架 | 0 |
 | 3 | `f49634c` | 静态路由 + mock 下游 | 1 |
+| 4 | 待 push | 硬编码 Bearer 认证 | 2 |
 
 ## 后续课程预告
 
 | Stage | 课题 | 你将学到 |
 |-------|------|----------|
-| 2 | 硬编码认证 | GlobalFilter、401 响应 |
 | 3 | 静态 JWT | RS256 验签、Claims |
 | 4 | JWKS | 远端公钥、密钥轮换 |
 | 5 ~ 7 | 插件体系 | SPI、ClassLoader、冷加载 |
