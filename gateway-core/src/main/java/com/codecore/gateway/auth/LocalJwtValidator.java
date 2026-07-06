@@ -1,0 +1,96 @@
+package com.codecore.gateway.auth;
+
+import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.crypto.RSASSAVerifier;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import org.springframework.stereotype.Component;
+
+import java.text.ParseException;
+import java.time.Instant;
+import java.util.Date;
+import java.util.List;
+
+/**
+ * 基于本地 RSA 公钥的 JWT 校验器。
+ * <p>
+ * Stage 3 实现：验证 RS256 签名，并校验 iss、aud、exp 等标准 Claims。
+ * </p>
+ */
+@Component
+public class LocalJwtValidator {
+
+    private final GatewayAuthProperties authProperties;
+    private final PublicKeyLoader publicKeyLoader;
+
+    /**
+     * @param authProperties  网关认证配置。
+     * @param publicKeyLoader 公钥加载器。
+     */
+    public LocalJwtValidator(GatewayAuthProperties authProperties, PublicKeyLoader publicKeyLoader) {
+        this.authProperties = authProperties;
+        this.publicKeyLoader = publicKeyLoader;
+    }
+
+    /**
+     * 校验 JWT 字符串是否合法。
+     * <p>
+     * 内部依次执行：解析 Token → RS256 验签 → 校验 iss/aud/exp。
+     * </p>
+     *
+     * @param rawJwt 不含 Bearer 前缀的 JWT 字符串。
+     * @return 校验结果。
+     */
+    public JwtValidationResult validate(String rawJwt) {
+        if (rawJwt == null || rawJwt.isBlank()) {
+            return JwtValidationResult.failure("缺少 JWT");
+        }
+
+        try {
+            SignedJWT signedJwt = SignedJWT.parse(rawJwt);
+            JWSVerifier verifier = new RSASSAVerifier(publicKeyLoader.getPublicKey());
+            if (!signedJwt.verify(verifier)) {
+                return JwtValidationResult.failure("JWT 签名无效");
+            }
+
+            JWTClaimsSet claims = signedJwt.getJWTClaimsSet();
+            return validateClaims(claims);
+        } catch (ParseException ex) {
+            return JwtValidationResult.failure("JWT 格式错误");
+        } catch (Exception ex) {
+            return JwtValidationResult.failure("JWT 校验失败");
+        }
+    }
+
+    /**
+     * 校验标准 Claims：签发者、受众、过期时间。
+     *
+     * @param claims JWT 载荷。
+     * @return 校验结果。
+     */
+    private JwtValidationResult validateClaims(JWTClaimsSet claims) {
+        GatewayJwtProperties jwt = authProperties.getJwt();
+
+        String issuer = claims.getIssuer();
+        if (issuer == null || !issuer.equals(jwt.getIssuer())) {
+            return JwtValidationResult.failure("JWT 签发者无效");
+        }
+
+        List<String> audiences = claims.getAudience();
+        if (audiences == null || !audiences.contains(jwt.getAudience())) {
+            return JwtValidationResult.failure("JWT 受众无效");
+        }
+
+        Date expiration = claims.getExpirationTime();
+        if (expiration == null) {
+            return JwtValidationResult.failure("JWT 缺少过期时间");
+        }
+
+        Instant expireAt = expiration.toInstant().plusSeconds(jwt.getClockSkewSeconds());
+        if (expireAt.isBefore(Instant.now())) {
+            return JwtValidationResult.failure("JWT 已过期");
+        }
+
+        return JwtValidationResult.success();
+    }
+}

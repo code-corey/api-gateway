@@ -8,9 +8,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
- * 硬编码认证过滤器 Web 层集成测试。
+ * JWT 认证过滤器 Web 层集成测试。
  * <p>
- * 验证无 Token、错误 Token、白名单路径等场景下的 HTTP 状态码行为。
+ * 验证 JWT 缺失、伪造、过期、签发者错误等场景下的 HTTP 状态码行为。
  * </p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -21,10 +21,7 @@ class GatewayAuthWebTests {
     private WebTestClient webTestClient;
 
     /**
-     * 访问受保护路径且未携带 Token 时应返回 401。
-     * <p>
-     * 内部向 /api/hello 发起 GET 请求，不设置 Authorization 头，期望网关拦截。
-     * </p>
+     * 未携带 Token 时应返回 401。
      */
     @Test
     void shouldReturn401WhenTokenMissing() {
@@ -37,19 +34,45 @@ class GatewayAuthWebTests {
     }
 
     /**
-     * 携带错误 Token 访问受保护路径时应返回 401。
+     * 非 JWT 字符串应返回 401。
      */
     @Test
     void shouldReturn401WhenTokenInvalid() {
         webTestClient.get()
                 .uri("/api/hello")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer wrong-token")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt")
                 .exchange()
                 .expectStatus().isUnauthorized();
     }
 
     /**
-     * Actuator 健康检查在白名单中，无需 Token 也应返回 200。
+     * 过期 JWT 应返回 401。
+     */
+    @Test
+    void shouldReturn401WhenTokenExpired() throws Exception {
+        webTestClient.get()
+                .uri("/api/hello")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + JwtTestTokenHelper.expiredToken())
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectBody()
+                .jsonPath("$.message").isEqualTo("JWT 已过期");
+    }
+
+    /**
+     * 签发者错误的 JWT 应返回 401。
+     */
+    @Test
+    void shouldReturn401WhenIssuerInvalid() throws Exception {
+        webTestClient.get()
+                .uri("/api/hello")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + JwtTestTokenHelper.wrongIssuerToken())
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    /**
+     * Actuator 健康检查在白名单中，无需 Token。
      */
     @Test
     void shouldAllowActuatorWithoutToken() {
@@ -60,20 +83,17 @@ class GatewayAuthWebTests {
     }
 
     /**
-     * 携带正确 Token 时不应被认证过滤器以 401 拒绝。
-     * <p>
-     * 下游 mock-backend 未启动时可能返回 502，但状态码一定不是 401。
-     * </p>
+     * 合法 JWT 不应被认证过滤器以 401 拒绝。
      */
     @Test
-    void shouldPassAuthWithValidToken() {
+    void shouldPassAuthWithValidJwt() throws Exception {
         webTestClient.get()
                 .uri("/api/hello")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer test-token-123")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + JwtTestTokenHelper.validToken())
                 .exchange()
                 .expectStatus().value(status -> {
                     if (status == 401) {
-                        throw new AssertionError("有效 Token 不应返回 401，实际: " + status);
+                        throw new AssertionError("合法 JWT 不应返回 401，实际: " + status);
                     }
                 });
     }

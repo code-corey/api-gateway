@@ -17,9 +17,14 @@ spring:
 gateway:
   auth:
     enabled: true
-    token: test-token-123
     exclude-paths:
       - /actuator/**
+    jwt:
+      enabled: true
+      issuer: https://auth.example.com
+      audience: api-gateway
+      public-key-location: classpath:jwt/dev-public.pem
+      clock-skew-seconds: 30
 
 management:
   endpoints:

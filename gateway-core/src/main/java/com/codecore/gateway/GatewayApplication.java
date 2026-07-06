@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * API 网关主应用入口。
  * <p>
- * Stage 2 在 Stage 1 基础上增加硬编码 Bearer Token 认证 GlobalFilter。
+ * Stage 3 在 Stage 2 基础上将硬编码 Token 替换为 RS256 JWT 本地公钥验签。
  * </p>
  */
 @SpringBootApplication
