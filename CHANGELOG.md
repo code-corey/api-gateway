@@ -1,0 +1,506 @@
+# Stage 教学日志
+
+> 本文件既是**变更记录**，也是**教学文档**。  
+> 每个 Stage 从零开始多推进一步：讲清楚「为什么做」「学什么」「怎么验」「改了什么」。  
+> 建议按 Stage 顺序阅读，并亲手跑一遍「动手实验」。
+
+---
+
+## 如何使用本文档
+
+| 阅读方式 | 适合谁 |
+|----------|--------|
+| 只看「本课小结」 | 快速回顾 |
+| 按「核心概念 → 动手实验」顺序 | 第一次学习 |
+| 查「变更记录」表格 | 代码 Review / 上线对账 |
+
+**配套材料：**
+
+- 总体规划：[README.md](./README.md)
+- 源代码仓库：https://github.com/code-corey/api-gateway
+
+---
+
+## 课程路线图
+
+```
+Stage 0  工程骨架          ← 会搭 Maven 项目、会看健康检查
+   ↓
+Stage 1  最小网关          ← 会配路由、理解请求转发
+   ↓
+Stage 2  硬编码认证        ← 会写 GlobalFilter（待学）
+   ↓
+  ...
+   ↓
+Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
+```
+
+### 进度索引
+
+| Stage | 工程名 | 你将要掌握 | 提交 | 状态 |
+|-------|--------|------------|------|------|
+| 0 | `api-gateway-bootstrap` | Maven 多模块 + Spring Boot 启动 | `9fc87b3` | ✅ |
+| 1 | `minimal-gateway` | Spring Cloud Gateway 静态路由 | `f49634c` | ✅ |
+| 2 | `gateway-with-hardcoded-auth` | Filter 链拦截请求 | — | ⏳ |
+| 3 ~ 12 | … | 见 README | — | ⏳ |
+
+---
+
+# Stage 0 — 工程骨架
+
+**工程名：** `api-gateway-bootstrap`  
+**提交：** `9fc87b3` · 2026-07-06  
+**一句话：** 先让项目能编译、能启动、能报健康状态——什么都不做，但地基要稳。
+
+---
+
+## 学习目标
+
+学完本 Stage，你应该能够：
+
+1. 说出 Maven 父 POM 与子模块的关系
+2. 创建一个最小 Spring Boot 应用并打包成 JAR
+3. 使用 Actuator 的 `/actuator/health` 判断服务是否存活
+4. 理解「先骨架、后业务」的分阶段开发思路
+
+---
+
+## 为什么要做这个 Stage
+
+很多项目一上来就写网关路由、JWT、插件——结果环境问题、依赖冲突、启动失败，很难判断是**基础设施**错了还是**业务逻辑**错了。
+
+Stage 0 故意只做三件事：
+
+- 项目结构对
+- 依赖版本对
+- 能启动、能探活
+
+这样 Stage 1 开始加网关时，如果出问题，你可以确定：**不是骨架的问题**。
+
+---
+
+## 核心概念
+
+### 1. Maven 多模块
+
+```
+api-gateway/          ← 父工程（packaging=pom），管版本、管模块
+└── gateway-core/     ← 子模块，真正可运行的应用
+```
+
+- **父 POM**：统一 Java 版本、Spring Boot 版本，避免子模块各写各的
+- **子模块**：以后还会加 `gateway-api`、`plugin-jwt`、`mock-backend` 等
+
+### 2. Spring Boot 启动器（Starter）
+
+| 依赖 | 作用 |
+|------|------|
+| `spring-boot-starter-web` | 内嵌 Tomcat，提供 HTTP 能力（Stage 0 使用；Stage 1 会换掉） |
+| `spring-boot-starter-actuator` | 暴露运维端点，如健康检查 |
+| `spring-boot-starter-test` | 测试支持，仅 test 范围 |
+
+### 3. Actuator 健康检查
+
+生产环境里，K8s、负载均衡器需要知道你的进程是否还活着。  
+`/actuator/health` 返回 `{"status":"UP"}` 就表示：**应用上下文已启动，核心组件正常**。
+
+---
+
+## 实现步骤（我们做了什么）
+
+| 步骤 | 动作 |
+|------|------|
+| 1 | 创建父工程 `pom.xml`，`groupId=com.codecore`，Java 17 |
+| 2 | 创建子模块 `gateway-core` |
+| 3 | 写入口类 `GatewayApplication`（一个 `@SpringBootApplication` 即可） |
+| 4 | 配置 `application.yml`：端口 8080，开放 health/info 端点 |
+| 5 | 写 `GatewayApplicationTests`：验证 Spring 容器能加载 |
+| 6 | 添加 `.gitignore`，更新 README 分阶段计划 |
+
+---
+
+## 代码解读
+
+### 入口类
+
+```java
+@SpringBootApplication
+public class GatewayApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(GatewayApplication.class, args);
+    }
+}
+```
+
+- `@SpringBootApplication` = 配置类 + 组件扫描 + 自动配置
+- 没有 Controller、没有路由——**故意的**，Stage 0 只验证「能活」
+
+### 配置文件
+
+```yaml
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+```
+
+- `server.port`：监听端口
+- `management.endpoints.web.exposure.include`：哪些 Actuator 端点对 HTTP 可见
+
+---
+
+## 动手实验
+
+```bash
+cd E:\MyGithub\api-gateway
+
+# 1. 编译 + 测试
+mvn clean package
+
+# 2. 启动
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+
+# 3. 健康检查（浏览器或 curl）
+curl http://localhost:8080/actuator/health
+```
+
+**期望输出：**
+
+```json
+{"status":"UP"}
+```
+
+### 思考题
+
+1. 如果把 `server.port` 改成 9090，健康检查的 URL 要改成什么？
+2. `GatewayApplicationTests` 没有写任何 `assert`，为什么也能发现配置错误？
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | BUILD SUCCESS |
+| 2 | 应用启动 | 日志出现 `Started GatewayApplication` |
+| 3 | 健康检查 | `/actuator/health` → `UP` |
+
+---
+
+## 变更记录
+
+| 类型 | 路径 |
+|------|------|
+| 新增 | `pom.xml`、`.gitignore`、`gateway-core/` 全部源码 |
+| 修改 | `README.md`（分阶段计划） |
+
+**Stage 0 时项目结构：**
+
+```
+api-gateway/
+├── pom.xml
+├── .gitignore
+├── README.md
+└── gateway-core/
+    ├── pom.xml
+    └── src/main/.../GatewayApplication.java
+    └── src/main/resources/application.yml
+    └── src/test/.../GatewayApplicationTests.java
+```
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| 分阶段开发 | 先保证能启动，再加业务 |
+| 父 POM | 管版本、管模块，自己不打包运行 |
+| Actuator | 健康检查是运维的「心跳」 |
+| Stage 0 不做 | 路由、认证、插件——都是后面的课 |
+
+**下一课预告（Stage 1）：** 把「空壳应用」变成真正能**转发请求**的网关。
+
+---
+
+# Stage 1 — 最小网关
+
+**工程名：** `minimal-gateway`  
+**提交：** `f49634c` · 2026-07-06  
+**一句话：** 客户端只访问网关，网关把请求转到下游——这是 API 网关最本质的能力。
+
+---
+
+## 学习目标
+
+学完本 Stage，你应该能够：
+
+1. 解释 API 网关在整个微服务架构中的位置
+2. 配置 Spring Cloud Gateway 的一条静态路由
+3. 理解 `Predicate`（断言）和 `Filter`（过滤器）的作用
+4. 读懂 `StripPrefix` 对 URL 路径的影响
+5. 用 `mock-backend` 在本地完成端到端转发验证
+
+---
+
+## 为什么要做这个 Stage
+
+真实环境里，客户端不应该直连每个微服务：
+
+```
+❌ 客户端 → 用户服务:8081
+           → 订单服务:8082
+           → 商品服务:8083   （地址多、难管理、无法统一鉴权）
+
+✅ 客户端 → API 网关:8080 → 各微服务   （统一入口）
+```
+
+Stage 1 用**一条最简单的路由**把这个模型跑通，后面加的认证、限流、插件，都是挂在这条链路上的。
+
+---
+
+## 核心概念
+
+### 1. Spring Cloud Gateway 是什么
+
+基于 **Spring WebFlux + Netty** 的响应式网关，核心三件事：
+
+| 概念 | 含义 | 本 Stage 示例 |
+|------|------|---------------|
+| **Route（路由）** | 一条转发规则 | `api-route` |
+| **Predicate（断言）** | 匹配条件，满足才走路由 | `Path=/api/**` |
+| **Filter（过滤器）** | 匹配后对请求/响应做处理 | `StripPrefix=1` |
+
+### 2. 为什么不能同时用 `starter-web` 和 Gateway
+
+| | `starter-web` | `spring-cloud-starter-gateway` |
+|--|---------------|-------------------------------|
+| 模型 | Servlet（Tomcat） | Reactive（Netty） |
+| 场景 | 普通 REST 应用 | API 网关 |
+
+两者冲突，所以 Stage 1 **移除了 `starter-web`**，换成 Gateway。
+
+> `mock-backend` 仍用 `starter-web`——它是普通下游服务，不是网关。
+
+### 3. StripPrefix 图解
+
+```
+客户端请求:  GET /api/hello
+                │
+    Gateway 匹配 /api/**
+                │
+    StripPrefix=1  → 去掉第 1 段路径 "api"
+                │
+转发到下游:  GET /hello   →  http://localhost:8081/hello
+```
+
+如果不加 `StripPrefix`，下游收到的是 `/api/hello`，而 `HelloController` 只映射了 `/hello`，会 404。
+
+### 4. 请求全链路
+
+```
+┌──────────┐     GET /api/hello      ┌─────────────────┐
+│  客户端   │ ──────────────────────▶ │ Gateway :8080   │
+└──────────┘                         │  api-route      │
+                                     └────────┬────────┘
+                                              │ GET /hello
+                                              ▼
+                                     ┌─────────────────┐
+                                     │ mock-backend    │
+                                     │ :8081           │
+                                     └────────┬────────┘
+                                              │
+                                              ▼
+                              {"message":"hello from mock backend"}
+```
+
+---
+
+## 实现步骤（我们做了什么）
+
+| 步骤 | 动作 |
+|------|------|
+| 1 | 父 POM 引入 Spring Cloud BOM `2023.0.4` |
+| 2 | `gateway-core` 依赖改为 `spring-cloud-starter-gateway` |
+| 3 | `application.yml` 增加路由：`/api/**` → `localhost:8081` |
+| 4 | 新建 `mock-backend` 模块，端口 8081，提供 `GET /hello` |
+| 5 | 联调验证转发；更新 README 与 CHANGELOG |
+
+---
+
+## 代码解读
+
+### 路由配置（核心）
+
+```yaml
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: api-route              # 路由唯一标识，方便日志和排查
+          uri: http://localhost:8081 # 下游地址
+          predicates:
+            - Path=/api/**           # 只转发 /api 开头的请求
+          filters:
+            - StripPrefix=1          # 去掉路径第一段 /api
+```
+
+### 模拟下游
+
+```java
+@RestController
+public class HelloController {
+    @GetMapping("/hello")
+    public Map<String, String> hello() {
+        return Map.of("message", "hello from mock backend");
+    }
+}
+```
+
+这是一个**最简下游**：没有数据库、没有业务逻辑，专门用来证明「网关确实把请求转过去了」。
+
+---
+
+## 动手实验
+
+### 实验 1：端到端转发
+
+```bash
+# 终端 1 — 下游（必须先启动）
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar
+
+# 终端 2 — 网关
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+
+# 终端 3 — 验证
+curl http://localhost:8081/hello          # 直连下游
+curl http://localhost:8080/api/hello      # 经网关转发
+```
+
+两次应返回相同 JSON：
+
+```json
+{"message":"hello from mock backend"}
+```
+
+### 实验 2：理解 StripPrefix
+
+尝试访问 `http://localhost:8080/api/hello`，观察网关日志中的转发 URL。
+
+再**临时注释掉** `StripPrefix=1`，重启网关，再次请求——应该会 404。  
+想想为什么？（提示：下游映射的是 `/hello` 不是 `/api/hello`）
+
+### 实验 3：路由不匹配
+
+访问 `http://localhost:8080/other/hello`——没有匹配的路由，网关会返回什么？
+
+### 思考题
+
+1. 如果下游改成 `GET /api/hello`，`StripPrefix` 还要不要？怎么配？
+2. 生产环境 `uri` 能写死 `localhost` 吗？Stage 11 会怎么解决？
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | 两个模块都编译成功 |
+| 2 | 下游启动 | 8081 可访问 `/hello` |
+| 3 | 网关启动 | 8080 健康检查 UP |
+| 4 | 转发 | `8080/api/hello` 返回下游 JSON |
+| 5 | 网关日志 | 能看到路由 `api-route` 被匹配 |
+
+---
+
+## 变更记录
+
+### 新增文件
+
+| 路径 | 说明 |
+|------|------|
+| `mock-backend/pom.xml` | 模拟下游模块 |
+| `mock-backend/.../MockBackendApplication.java` | 下游入口 |
+| `mock-backend/.../HelloController.java` | `/hello` 接口 |
+| `mock-backend/.../application.yml` | 端口 8081 |
+
+### 修改文件
+
+| 路径 | 说明 |
+|------|------|
+| `pom.xml` | +`mock-backend` 模块，+Spring Cloud BOM |
+| `gateway-core/pom.xml` | web → gateway |
+| `gateway-core/.../application.yml` | +路由配置 |
+| `README.md` | Stage 1 标记完成 |
+
+### Stage 0 → Stage 1 对比
+
+| 维度 | Stage 0 | Stage 1 |
+|------|---------|---------|
+| 模块 | 1 | 2（+mock-backend） |
+| Web 栈 | Servlet | Reactive（Gateway） |
+| 业务能力 | 仅探活 | 请求转发 |
+| Spring Cloud | 无 | 2023.0.4 |
+
+---
+
+## 常见问题
+
+**Q：网关启动报错 `Port 8080 was already in use`**  
+A：上次进程没关。Windows 下 `Get-Process java | Stop-Process -Force`，或换端口。
+
+**Q：`mvn clean` 失败，删不掉 jar**  
+A：jar 正在被运行。先停掉 Java 进程再编译。
+
+**Q：网关 404，但下游直连正常**  
+A：检查 `StripPrefix` 与下游 Controller 路径是否对齐。
+
+**Q：Gateway 和 Zuul 有什么区别？**  
+A：Zuul 1.x 基于 Servlet，已偏旧；Spring Cloud Gateway 基于 WebFlux，是 Spring 官方当前推荐的网关方案。
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| 网关本质 | 统一入口 + 按规则转发 |
+| 路由三要素 | Route + Predicate + Filter |
+| StripPrefix | 网关对外路径 ≠ 下游内部路径时常用 |
+| mock-backend | 教学用假下游，让你不依赖外部服务也能验 |
+| Stage 1 不做 | 认证、JWT、插件——Stage 2 开始 |
+
+**下一课预告（Stage 2）：** 在转发之前加一道关——没有 Token 的请求直接 401。
+
+---
+
+# 附录
+
+## Git 提交记录
+
+| 顺序 | 提交 | 说明 | Stage |
+|------|------|------|-------|
+| 1 | `8b082f5` | 需求与架构文档 | 文档 |
+| 2 | `9fc87b3` | Maven 骨架 | 0 |
+| 3 | `f49634c` | 静态路由 + mock 下游 | 1 |
+
+## 后续课程预告
+
+| Stage | 课题 | 你将学到 |
+|-------|------|----------|
+| 2 | 硬编码认证 | GlobalFilter、401 响应 |
+| 3 | 静态 JWT | RS256 验签、Claims |
+| 4 | JWKS | 远端公钥、密钥轮换 |
+| 5 ~ 7 | 插件体系 | SPI、ClassLoader、冷加载 |
+| 8 ~ 10 | 热部署 | 不重启换 JAR、Admin API、回滚 |
+| 11 ~ 12 | 生产化 | 集群同步、监控、安全 |
+
+每完成一个 Stage，在本文档追加对应教学章节。
