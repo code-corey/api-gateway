@@ -10,18 +10,14 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <artifactId>gateway-core</artifactId>
-    <name>gateway-core</name>
-    <description>API 网关主应用模块</description>
+    <artifactId>mock-backend</artifactId>
+    <name>mock-backend</name>
+    <description>Stage 1 本地联调用的下游模拟服务</description>
 
     <dependencies>
         <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-gateway</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-actuator</artifactId>
+            <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

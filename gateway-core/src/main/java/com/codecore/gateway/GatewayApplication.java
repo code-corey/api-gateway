@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * API 网关主应用入口。
  * <p>
- * Stage 0 仅提供可启动的 Spring Boot 骨架与健康检查，不包含路由、认证与插件能力。
+ * Stage 1 在 Stage 0 基础上接入 Spring Cloud Gateway，将 /api/** 请求转发到下游服务。
  * </p>
  */
 @SpringBootApplication
