@@ -42,7 +42,7 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 0 | `api-gateway-bootstrap` | Maven 多模块 + Spring Boot 启动 | `9fc87b3` | ✅ |
 | 1 | `minimal-gateway` | Spring Cloud Gateway 静态路由 | `f49634c` | ✅ |
 | 2 | `gateway-with-hardcoded-auth` | GlobalFilter 硬编码认证 | `9a550e8` | ✅ |
-| 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | — | ⏳ |
+| 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | — | ✅ |
 | 4 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
