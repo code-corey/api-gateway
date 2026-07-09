@@ -23,7 +23,8 @@ gateway:
       enabled: true
       issuer: https://auth.example.com
       audience: api-gateway
-      public-key-location: classpath:jwt/dev-public.pem
+      jwks-uri: http://localhost:8082/.well-known/jwks.json
+      jwks-refresh-interval-seconds: 300
       clock-skew-seconds: 30
 
 management:

@@ -925,6 +925,74 @@ curl -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
 
 ---
 
+# Stage 4 — JWKS 远端拉取公钥
+
+**工程名：** `gateway-with-jwks`  
+**提交：** 待 push · 2026-07-09  
+**一句话：** 公钥从 Auth 服务的 JWKS 端点动态拉取，支持 kid 匹配与定时刷新。
+
+---
+
+## 学习目标
+
+1. 理解 JWKS 是什么，以及为何生产环境不用本地 PEM
+2. 实现 JWKS 拉取、缓存与按 `kid` 选钥
+3. 理解密钥轮换（Key Rotation）与定时刷新
+4. 搭建 `mock-jwks-server` 模拟 Auth 服务
+
+---
+
+## 核心变更
+
+| 组件 | 作用 |
+|------|------|
+| `JwksKeyProvider` | WebClient 拉取 JWKS，按 kid 返回公钥 |
+| `JwksRefreshScheduler` | 定时刷新 JWKS 缓存 |
+| `mock-jwks-server` | :8082 提供 `/.well-known/jwks.json` |
+| 移除 `PublicKeyLoader` | 不再使用本地 PEM 验签 |
+
+**配置：**
+
+```yaml
+gateway:
+  auth:
+    jwt:
+      jwks-uri: http://localhost:8082/.well-known/jwks.json
+      jwks-refresh-interval-seconds: 300
+```
+
+**本地联调（3 个进程）：**
+
+```bash
+java -jar mock-jwks-server/target/mock-jwks-server-0.0.1-SNAPSHOT.jar   # :8082
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar         # :8081
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar         # :8080
+# JWT：运行 JwtDevTokenPrinter.main()
+curl -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
+```
+
+**密钥轮换演示：**
+
+```bash
+curl -X POST http://localhost:8082/admin/rotate-key
+# 等待网关 JWKS 刷新后，旧 kid 的 JWT 将验签失败
+```
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| JWKS | Auth 服务公布「当前有效公钥集合」的标准格式 |
+| kid | JWT Header 里的密钥 ID，用来选哪把公钥验签 |
+| 定时刷新 | 支持密钥轮换，不必重启网关 |
+| Stage 4 不做 | 插件化——Stage 5 开始 |
+
+**下一课预告（Stage 5）：** 把认证逻辑抽成 `AuthPlugin` 接口。
+
+---
+
 # 附录
 
 ## Git 提交记录

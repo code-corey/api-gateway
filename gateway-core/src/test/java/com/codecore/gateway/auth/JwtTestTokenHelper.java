@@ -19,7 +19,7 @@ import java.util.Date;
 /**
  * 测试用 JWT 签发工具。
  * <p>
- * 使用 test/resources 下的 dev-private.pem 生成 RS256 JWT，供集成测试与本地联调。
+ * 使用 test/resources 下的 dev-private.pem 生成 RS256 JWT，Header 含 kid 供 JWKS 匹配。
  * </p>
  */
 public final class JwtTestTokenHelper {
@@ -59,11 +59,6 @@ public final class JwtTestTokenHelper {
 
     /**
      * 使用测试私钥签发 JWT。
-     *
-     * @param issuer    签发者。
-     * @param audience  受众。
-     * @param expiresAt 过期时间。
-     * @return 序列化后的 JWT 字符串。
      */
     private static String buildToken(String issuer, String audience, Date expiresAt) throws Exception {
         ClassPathResource resource = new ClassPathResource("jwt/dev-private.pem");
@@ -79,17 +74,14 @@ public final class JwtTestTokenHelper {
                 .expirationTime(expiresAt)
                 .build();
 
-        SignedJWT signedJwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
+        JWSHeader header = new JWSHeader.Builder(JWSAlgorithm.RS256)
+                .keyID(GatewayJwtProperties.DEFAULT_KEY_ID)
+                .build();
+        SignedJWT signedJwt = new SignedJWT(header, claims);
         signedJwt.sign(signer);
         return signedJwt.serialize();
     }
 
-    /**
-     * 将 PKCS#8 PEM 私钥解析为 {@link RSAPrivateKey}。
-     *
-     * @param pem PEM 文本。
-     * @return RSA 私钥。
-     */
     private static RSAPrivateKey parsePrivateKey(String pem) throws Exception {
         String base64 = pem
                 .replace("-----BEGIN PRIVATE KEY-----", "")

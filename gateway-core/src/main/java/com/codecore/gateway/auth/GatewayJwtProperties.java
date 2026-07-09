@@ -3,13 +3,18 @@ package com.codecore.gateway.auth;
 /**
  * 网关 JWT 验签配置。
  * <p>
- * Stage 3 使用本地 PEM 公钥文件校验 RS256 JWT，绑定 gateway.auth.jwt 前缀。
+ * Stage 4 起从 JWKS 端点拉取公钥并按 kid 验签 RS256 JWT。
  * </p>
  */
 public class GatewayJwtProperties {
 
     /**
-     * 是否启用 JWT 验签（Stage 3 起默认启用）。
+     * JWT 验签默认密钥 ID，测试签发时需与 JWKS 中 kid 一致。
+     */
+    public static final String DEFAULT_KEY_ID = "dev-key-1";
+
+    /**
+     * 是否启用 JWT 验签。
      */
     private boolean enabled = true;
 
@@ -24,9 +29,14 @@ public class GatewayJwtProperties {
     private String audience = "api-gateway";
 
     /**
-     * RSA 公钥 PEM 文件位置，支持 classpath: 与 file:。
+     * JWKS 端点 URL，例如 http://localhost:8082/.well-known/jwks.json。
      */
-    private String publicKeyLocation = "classpath:jwt/dev-public.pem";
+    private String jwksUri = "http://localhost:8082/.well-known/jwks.json";
+
+    /**
+     * JWKS 缓存刷新间隔（秒）。
+     */
+    private long jwksRefreshIntervalSeconds = 300;
 
     /**
      * 时钟偏移容差（秒），用于缓解多机时间差导致的 exp/nbf 误判。
@@ -57,12 +67,20 @@ public class GatewayJwtProperties {
         this.audience = audience;
     }
 
-    public String getPublicKeyLocation() {
-        return publicKeyLocation;
+    public String getJwksUri() {
+        return jwksUri;
     }
 
-    public void setPublicKeyLocation(String publicKeyLocation) {
-        this.publicKeyLocation = publicKeyLocation;
+    public void setJwksUri(String jwksUri) {
+        this.jwksUri = jwksUri;
+    }
+
+    public long getJwksRefreshIntervalSeconds() {
+        return jwksRefreshIntervalSeconds;
+    }
+
+    public void setJwksRefreshIntervalSeconds(long jwksRefreshIntervalSeconds) {
+        this.jwksRefreshIntervalSeconds = jwksRefreshIntervalSeconds;
     }
 
     public long getClockSkewSeconds() {

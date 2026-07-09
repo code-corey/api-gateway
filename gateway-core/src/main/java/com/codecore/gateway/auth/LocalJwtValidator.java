@@ -6,36 +6,37 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import org.springframework.stereotype.Component;
 
+import java.security.interfaces.RSAPublicKey;
 import java.text.ParseException;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 
 /**
- * 基于本地 RSA 公钥的 JWT 校验器。
+ * JWT 校验器。
  * <p>
- * Stage 3 实现：验证 RS256 签名，并校验 iss、aud、exp 等标准 Claims。
+ * Stage 4：通过 JWKS 按 kid 获取公钥，验证 RS256 签名并校验 iss、aud、exp。
  * </p>
  */
 @Component
 public class LocalJwtValidator {
 
     private final GatewayAuthProperties authProperties;
-    private final PublicKeyLoader publicKeyLoader;
+    private final JwksKeyProvider jwksKeyProvider;
 
     /**
      * @param authProperties  网关认证配置。
-     * @param publicKeyLoader 公钥加载器。
+     * @param jwksKeyProvider JWKS 公钥提供者。
      */
-    public LocalJwtValidator(GatewayAuthProperties authProperties, PublicKeyLoader publicKeyLoader) {
+    public LocalJwtValidator(GatewayAuthProperties authProperties, JwksKeyProvider jwksKeyProvider) {
         this.authProperties = authProperties;
-        this.publicKeyLoader = publicKeyLoader;
+        this.jwksKeyProvider = jwksKeyProvider;
     }
 
     /**
      * 校验 JWT 字符串是否合法。
      * <p>
-     * 内部依次执行：解析 Token → RS256 验签 → 校验 iss/aud/exp。
+     * 内部依次执行：解析 Token → 按 kid 取公钥 → RS256 验签 → 校验 iss/aud/exp。
      * </p>
      *
      * @param rawJwt 不含 Bearer 前缀的 JWT 字符串。
@@ -48,7 +49,13 @@ public class LocalJwtValidator {
 
         try {
             SignedJWT signedJwt = SignedJWT.parse(rawJwt);
-            JWSVerifier verifier = new RSASSAVerifier(publicKeyLoader.getPublicKey());
+            String keyId = signedJwt.getHeader().getKeyID();
+            if (keyId == null || keyId.isBlank()) {
+                return JwtValidationResult.failure("JWT 缺少 kid");
+            }
+
+            RSAPublicKey publicKey = jwksKeyProvider.getPublicKey(keyId);
+            JWSVerifier verifier = new RSASSAVerifier(publicKey);
             if (!signedJwt.verify(verifier)) {
                 return JwtValidationResult.failure("JWT 签名无效");
             }
@@ -57,6 +64,8 @@ public class LocalJwtValidator {
             return validateClaims(claims);
         } catch (ParseException ex) {
             return JwtValidationResult.failure("JWT 格式错误");
+        } catch (IllegalStateException ex) {
+            return JwtValidationResult.failure(ex.getMessage());
         } catch (Exception ex) {
             return JwtValidationResult.failure("JWT 校验失败");
         }

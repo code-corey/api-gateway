@@ -22,6 +22,7 @@
     <modules>
         <module>gateway-core</module>
         <module>mock-backend</module>
+        <module>mock-jwks-server</module>
     </modules>
 
     <properties>
@@ -47,6 +48,11 @@
             <dependency>
                 <groupId>com.codecore</groupId>
                 <artifactId>mock-backend</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.codecore</groupId>
+                <artifactId>mock-jwks-server</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

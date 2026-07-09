@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * API 网关主应用入口。
  * <p>
- * Stage 3 在 Stage 2 基础上将硬编码 Token 替换为 RS256 JWT 本地公钥验签。
+ * Stage 4 在 Stage 3 基础上改为从 JWKS 端点拉取公钥并按 kid 验签 JWT。
  * </p>
  */
 @SpringBootApplication
