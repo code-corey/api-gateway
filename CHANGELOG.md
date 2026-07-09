@@ -1005,12 +1005,14 @@ curl -X POST http://localhost:8082/admin/rotate-key
 | 3 | `f49634c` | 静态路由 + mock 下游 | 1 |
 | 4 | `9a550e8` | 硬编码 Bearer 认证 | 2 |
 | 5 | `863a027` | JWT 本地公钥验签 | 3 |
+| 6 | `ae9fe90` | RSA 密钥对生成工具 | 工具 |
+| 7 | `7ae0e87` | JWKS 远端拉取 + mock-jwks-server | 4 |
 
 ## 后续课程预告
 
 | Stage | 课题 | 你将学到 |
 |-------|------|----------|
-| 4 | JWKS | 远端公钥、密钥轮换 |
+| 5 | 插件 SPI | AuthPlugin 接口契约 |
 | 5 ~ 7 | 插件体系 | SPI、ClassLoader、冷加载 |
 | 8 ~ 10 | 热部署 | 不重启换 JAR、Admin API、回滚 |
 | 11 ~ 12 | 生产化 | 集群同步、监控、安全 |
