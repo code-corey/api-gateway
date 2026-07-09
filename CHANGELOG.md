@@ -44,7 +44,8 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 2 | `gateway-with-hardcoded-auth` | GlobalFilter 硬编码认证 | `9a550e8` | ✅ |
 | 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | `863a027` | ✅ |
 | 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
-| 5 ~ 12 | … | 见 README | — | ⏳ |
+| 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | — | ✅ |
+| 6 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
 
@@ -994,6 +995,69 @@ curl -X POST http://localhost:8082/admin/rotate-key
 
 ---
 
+# Stage 5 — 插件 SPI 接口层
+
+**工程名：** `gateway-plugin-api`  
+**提交：** 待 push · 2026-07-09  
+**一句话：** 认证逻辑从 Filter 里抽出来，变成可插拔的 `AuthPlugin` 契约。
+
+---
+
+## 学习目标
+
+1. 理解 SPI（Service Provider Interface）在插件化架构中的作用
+2. 定义 `AuthPlugin` 及请求/响应模型
+3. 网关 Filter 只负责调用插件，不再硬编码 JWT 逻辑
+4. 为 Stage 6 独立 JAR 插件打包做准备
+
+---
+
+## 核心变更
+
+### 新模块 `gateway-api`（纯契约，无 Spring 依赖）
+
+| 类型 | 说明 |
+|------|------|
+| `AuthPlugin` | 插件 SPI：`init` / `authenticate` / `destroy` / `metadata` |
+| `AuthRequest` | 路径、方法、IP、traceId、headers |
+| `AuthResult` | 状态 + 消息 + 转发 Header |
+| `PluginContext` | 配置与日志访问 |
+| `PluginMetadata` | 名称、版本、作者 |
+
+### gateway-core 重构
+
+| 组件 | 作用 |
+|------|------|
+| `JwtAuthPlugin` | 内置 JWT 实现（暂留 core 内，Stage 6 外移） |
+| `AuthPluginManager` | 持有当前插件，调用 `init()` |
+| `AuthPluginGlobalFilter` | 替换 `JwtAuthGlobalFilter`，走 SPI |
+| `SpringPluginContext` | `PluginContext` 的 Spring 实现 |
+
+### 调用链（Stage 5）
+
+```
+请求 → AuthPluginGlobalFilter
+         → AuthPluginManager.getCurrentPlugin()
+         → JwtAuthPlugin.authenticate(AuthRequest)
+         → LocalJwtValidator（JWKS 验签）
+         → AuthResult → 401 或继续转发
+```
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| SPI | 网关与插件之间的「合同」 |
+| gateway-api | 独立 artifact，插件只依赖它 |
+| Filter 变薄 | 只构造 AuthRequest、调插件、处理结果 |
+| Stage 5 不做 | 独立 JAR、热部署——Stage 6/8 |
+
+**下一课预告（Stage 6）：** 把 `JwtAuthPlugin` 打成独立 JAR，启动时加载。
+
+---
+
 # 附录
 
 ## Git 提交记录
@@ -1007,12 +1071,13 @@ curl -X POST http://localhost:8082/admin/rotate-key
 | 5 | `863a027` | JWT 本地公钥验签 | 3 |
 | 6 | `ae9fe90` | RSA 密钥对生成工具 | 工具 |
 | 7 | `7ae0e87` | JWKS 远端拉取 + mock-jwks-server | 4 |
+| 8 | 待 push | AuthPlugin SPI 接口层 | 5 |
 
 ## 后续课程预告
 
 | Stage | 课题 | 你将学到 |
 |-------|------|----------|
-| 5 | 插件 SPI | AuthPlugin 接口契约 |
+| 6 | 独立 JAR 插件 | plugin-jwt 模块打包 |
 | 5 ~ 7 | 插件体系 | SPI、ClassLoader、冷加载 |
 | 8 ~ 10 | 热部署 | 不重启换 JAR、Admin API、回滚 |
 | 11 ~ 12 | 生产化 | 集群同步、监控、安全 |

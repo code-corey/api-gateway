@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * API 网关主应用入口。
  * <p>
- * Stage 4 在 Stage 3 基础上改为从 JWKS 端点拉取公钥并按 kid 验签 JWT。
+ * Stage 5 在 Stage 4 基础上将认证逻辑抽象为 AuthPlugin SPI，由 AuthPluginManager 统一调度。
  * </p>
  */
 @SpringBootApplication

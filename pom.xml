@@ -20,6 +20,7 @@
     <description>支持认证插件热部署的微服务 API 网关</description>
 
     <modules>
+        <module>gateway-api</module>
         <module>gateway-core</module>
         <module>mock-backend</module>
         <module>mock-jwks-server</module>
@@ -39,6 +40,11 @@
                 <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.codecore</groupId>
+                <artifactId>gateway-api</artifactId>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.codecore</groupId>
