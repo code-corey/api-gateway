@@ -20,6 +20,6 @@ public final class JwtDevTokenPrinter {
         String token = JwtTestTokenHelper.validToken();
         System.out.println("Bearer " + token);
         System.out.println();
-        System.out.println("curl -H \"Authorization: Bearer " + token + "\" http://localhost:8080/api/hello");
+        System.out.println("curl.exe -H \"Authorization: Bearer " + token + "\" http://localhost:8080/api/hello");
     }
 }
