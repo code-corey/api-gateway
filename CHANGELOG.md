@@ -44,7 +44,7 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 2 | `gateway-with-hardcoded-auth` | GlobalFilter 硬编码认证 | `9a550e8` | ✅ |
 | 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | `863a027` | ✅ |
 | 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
-| 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | — | ✅ |
+| 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | `16adc84` | ✅ |
 | 6 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
@@ -998,7 +998,7 @@ curl -X POST http://localhost:8082/admin/rotate-key
 # Stage 5 — 插件 SPI 接口层
 
 **工程名：** `gateway-plugin-api`  
-**提交：** 待 push · 2026-07-09  
+**提交：** `16adc84` · 2026-07-09  
 **一句话：** 认证逻辑从 Filter 里抽出来，变成可插拔的 `AuthPlugin` 契约。
 
 ---
@@ -1071,7 +1071,7 @@ curl -X POST http://localhost:8082/admin/rotate-key
 | 5 | `863a027` | JWT 本地公钥验签 | 3 |
 | 6 | `ae9fe90` | RSA 密钥对生成工具 | 工具 |
 | 7 | `7ae0e87` | JWKS 远端拉取 + mock-jwks-server | 4 |
-| 8 | 待 push | AuthPlugin SPI 接口层 | 5 |
+| 8 | `16adc84` | AuthPlugin SPI 接口层 | 5 |
 
 ## 后续课程预告
 
