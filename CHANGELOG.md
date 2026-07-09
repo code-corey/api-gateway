@@ -43,7 +43,8 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 1 | `minimal-gateway` | Spring Cloud Gateway 静态路由 | `f49634c` | ✅ |
 | 2 | `gateway-with-hardcoded-auth` | GlobalFilter 硬编码认证 | `9a550e8` | ✅ |
 | 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | `863a027` | ✅ |
-| 4 ~ 12 | … | 见 README | — | ⏳ |
+| 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
+| 5 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
 
@@ -928,7 +929,7 @@ curl -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
 # Stage 4 — JWKS 远端拉取公钥
 
 **工程名：** `gateway-with-jwks`  
-**提交：** 待 push · 2026-07-09  
+**提交：** `7ae0e87` · 2026-07-09  
 **一句话：** 公钥从 Auth 服务的 JWKS 端点动态拉取，支持 kid 匹配与定时刷新。
 
 ---
