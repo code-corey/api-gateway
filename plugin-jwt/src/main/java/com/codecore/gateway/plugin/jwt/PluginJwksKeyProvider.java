@@ -1,42 +1,41 @@
-package com.codecore.gateway.auth;
+package com.codecore.gateway.plugin.jwt;
 
 import com.nimbusds.jose.jwk.JWKSet;
-import jakarta.annotation.PostConstruct;
-import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JWKS 公钥提供者。
+ * 插件内 JWKS 公钥提供者。
  * <p>
- * Stage 4 从远端 Auth 服务拉取 JWKS 并缓存，按 JWT Header 中的 kid 匹配 RSA 公钥。
+ * 使用 JDK {@link HttpClient} 拉取 JWKS，不依赖 Spring WebClient。
  * </p>
  */
-@Component
-public class JwksKeyProvider {
+public class PluginJwksKeyProvider {
 
-    private final GatewayAuthProperties authProperties;
-    private final WebClient webClient;
+    private final String jwksUri;
+    private final HttpClient httpClient;
     private final AtomicReference<JWKSet> cachedJwkSet = new AtomicReference<>();
 
     /**
-     * @param authProperties 网关认证配置。
-     * @param webClientBuilder WebClient 构建器。
+     * @param jwksUri JWKS 端点 URL。
      */
-    public JwksKeyProvider(GatewayAuthProperties authProperties, WebClient.Builder webClientBuilder) {
-        this.authProperties = authProperties;
-        this.webClient = webClientBuilder.build();
+    public PluginJwksKeyProvider(String jwksUri) {
+        this.jwksUri = jwksUri;
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
     }
 
     /**
      * 启动时拉取 JWKS 并写入内存缓存。
      */
-    @PostConstruct
-    void initialize() {
+    public void initialize() {
         refresh();
     }
 
@@ -62,19 +61,26 @@ public class JwksKeyProvider {
 
     /**
      * 从 JWKS 端点拉取最新公钥集合并更新缓存。
-     * <p>
-     * 内部使用 WebClient 同步请求 jwksUri，解析为 {@link JWKSet} 后原子替换缓存。
-     * </p>
      */
     public synchronized void refresh() {
-        GatewayJwtProperties jwt = authProperties.getJwt();
-        String jwksJson = webClient.get()
-                .uri(jwt.getJwksUri())
-                .retrieve()
-                .bodyToMono(String.class)
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(jwksUri))
                 .timeout(Duration.ofSeconds(5))
-                .onErrorResume(ex -> Mono.error(new IllegalStateException("JWKS 拉取失败: " + ex.getMessage(), ex)))
-                .block();
+                .GET()
+                .build();
+
+        String jwksJson;
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("JWKS 拉取失败: HTTP " + response.statusCode());
+            }
+            jwksJson = response.body();
+        } catch (IllegalStateException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new IllegalStateException("JWKS 拉取失败: " + ex.getMessage(), ex);
+        }
 
         if (jwksJson == null || jwksJson.isBlank()) {
             throw new IllegalStateException("JWKS 响应为空");

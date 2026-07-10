@@ -45,7 +45,8 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | `863a027` | ✅ |
 | 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
 | 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | `16adc84` | ✅ |
-| 6 ~ 12 | … | 见 README | — | ⏳ |
+| 6 | `gateway-jwt-plugin-jar` | JWT 独立 JAR + 静态加载 | 待提交 | ✅ |
+| 7 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
 
@@ -930,7 +931,7 @@ curl -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
 # Stage 4 — JWKS 远端拉取公钥
 
 **工程名：** `gateway-with-jwks`  
-**提交：** `7ae0e87` · 2026-07-09  
+**提交：** `7ae0e87` · 2026-07-09（多钥轮换：`5643fb6`）  
 **一句话：** 公钥从 Auth 服务的 JWKS 端点动态拉取，支持 kid 匹配与定时刷新。
 
 ---
@@ -963,40 +964,91 @@ gateway:
       jwks-refresh-interval-seconds: 300
 ```
 
-**本地联调（3 个进程）：**
+---
+
+## 动手实验
+
+### 实验 1：三进程联调（基础 JWKS 验签）
 
 ```bash
-java -jar mock-jwks-server/target/mock-jwks-server-0.0.1-SNAPSHOT.jar   # :8082
-java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar         # :8081
-java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar         # :8080
-# JWT：运行 JwtDevTokenPrinter.main()
-curl -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
+cd E:\MyGithub\api-gateway
+mvn clean package
+
+# 终端 1 — Mock Auth（JWKS）
+java -jar mock-jwks-server/target/mock-jwks-server-0.0.1-SNAPSHOT.jar
+
+# 终端 2 — 模拟下游
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar
+
+# 终端 3 — 网关
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+
+# 终端 4 — 生成 JWT（IDE 运行 JwtDevTokenPrinter.main，或使用 mock-jwks issue-token）
+curl -i http://localhost:8080/api/hello
+curl -i -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
+curl http://localhost:8080/actuator/health
 ```
 
-**密钥轮换演示（多钥并存，贴近生产）：**
+**期望结果：**
+
+| 请求 | 期望 |
+|------|------|
+| 无 Token | HTTP 401 |
+| 合法 JWT | HTTP 200 + 下游 JSON |
+| `/actuator/health` 无 Token | HTTP 200 |
+
+### 实验 2：密钥轮换（多钥并存，贴近生产）
 
 ```bash
-# 1. 用 JwtDevTokenPrinter 或旧方式拿到 kid=dev-key-1 的 JWT（OLD_TOKEN）
+# 1. 用 JwtDevTokenPrinter 或 issue-token 拿到 kid=dev-key-1 的 JWT（OLD_TOKEN）
+curl -X POST http://localhost:8082/admin/issue-token
+
 # 2. 查看 JWKS 中的 kid 列表
 curl http://localhost:8082/admin/keys
 
 # 3. 轮换：追加新钥，旧钥 dev-key-1 仍保留
 curl -X POST http://localhost:8082/admin/rotate-key
 
-# 4. 触发网关刷新 JWKS（或等待定时刷新 / 用新 kid 请求触发 refresh）
+# 4. 旧 Token 仍应通过（kid=dev-key-1 的公钥仍在 JWKS 中）
 curl http://localhost:8080/api/hello -H "Authorization: Bearer <OLD_TOKEN>"
-# → 仍应通过（kid=dev-key-1 的公钥仍在 JWKS 中）
 
 # 5. 用新钥签发 Token
 curl -X POST http://localhost:8082/admin/issue-token
-# → 返回 kid=rotated-key-xxx 的新 JWT
 
-# 6. 重叠窗口结束：撤销旧钥（模拟生产清理）
+# 6. 重叠窗口结束：撤销旧钥
 curl -X DELETE http://localhost:8082/admin/keys/dev-key-1
 # → 此后 OLD_TOKEN 将因 JWKS 中无 dev-key-1 而验签失败
 ```
 
 > **要点：** 网关按 JWT Header 的 `kid` 在 JWKS **集合**中选公钥，不是使用「最新一把钥」。轮换时 Auth 应 **追加** 新公钥，旧 Token 在 `exp` 内仍可验签。
+
+### 思考题
+
+1. 为什么 kid miss 时会触发 refresh？高并发下有什么风险？
+2. 如果 Auth 服务短暂不可用，网关应 fail-open 还是 fail-close？
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | BUILD SUCCESS |
+| 2 | mock-jwks-server :8082 | `/admin/keys` 可访问 |
+| 3 | 合法 JWT 经网关 | 200（下游已启动） |
+| 4 | 轮换后旧 Token | 重叠窗口内仍 200 |
+| 5 | 撤销旧 kid 后 | 旧 Token 401 |
+
+---
+
+## 变更记录
+
+| 类型 | 路径 |
+|------|------|
+| 新增 | `mock-jwks-server/`、`JwksKeyProvider`、`JwksRefreshScheduler` |
+| 修改 | `LocalJwtValidator`（JWKS 模式）、`application.yml` |
+| 删除 | `PublicKeyLoader` |
+| 改进 | `5643fb6` mock-jwks 多钥并存轮换模型 |
 
 ---
 
@@ -1064,6 +1116,70 @@ curl -X DELETE http://localhost:8082/admin/keys/dev-key-1
 
 ---
 
+## 动手实验
+
+### 实验 1：验证 SPI 调用链与认证行为不变
+
+```bash
+cd E:\MyGithub\api-gateway
+mvn clean package
+
+# 终端 1~3：与 Stage 4 相同，启动 mock-jwks、mock-backend、gateway-core
+java -jar mock-jwks-server/target/mock-jwks-server-0.0.1-SNAPSHOT.jar
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+
+# 观察启动日志：应出现「JWT 认证插件已初始化: jwt-auth v1.0.0」
+# 获取 JWT
+curl -X POST http://localhost:8082/admin/issue-token
+
+# 无 Token → 401
+curl -i http://localhost:8080/api/hello
+
+# 合法 JWT → 200
+curl -i -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
+```
+
+### 实验 2：对比 Stage 4 与 Stage 5 的代码结构
+
+打开以下文件，理解「Filter 变薄、插件变厚」：
+
+| 文件 | 职责 |
+|------|------|
+| `gateway-api/.../AuthPlugin.java` | SPI 契约（无 Spring） |
+| `AuthPluginGlobalFilter.java` | 构造 AuthRequest、调插件 |
+| `JwtAuthPlugin.java` | JWT 验签实现（Stage 5 仍在 core 内） |
+| `AuthPluginManager.java` | 持有当前插件 |
+
+### 思考题
+
+1. 为什么 `gateway-api` 不能依赖 Spring？
+2. Stage 6 为什么要把 `JwtAuthPlugin` 移出 core？
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | 全部测试通过 |
+| 2 | 启动日志 | 出现插件初始化日志 |
+| 3 | 无 Token | HTTP 401 |
+| 4 | 合法 JWT | HTTP 200 |
+| 5 | `AuthPluginManagerTests` | 通过 |
+
+---
+
+## 变更记录
+
+| 类型 | 路径 |
+|------|------|
+| 新增 | `gateway-api/` 模块、`JwtAuthPlugin`、`AuthPluginManager`、`AuthPluginGlobalFilter` |
+| 删除 | `JwtAuthGlobalFilter` |
+| 修改 | README、本教学日志 |
+
+---
+
 ## 本课小结
 
 | 要点 | 记住这句话 |
@@ -1073,7 +1189,184 @@ curl -X DELETE http://localhost:8082/admin/keys/dev-key-1
 | Filter 变薄 | 只构造 AuthRequest、调插件、处理结果 |
 | Stage 5 不做 | 独立 JAR、热部署——Stage 6/8 |
 
-**下一课预告（Stage 6）：** 把 `JwtAuthPlugin` 打成独立 JAR，启动时加载。
+**下一课预告（Stage 6）：** 把 `JwtAuthPlugin` 打成独立 JAR，启动时从 `plugins/` 加载。
+
+---
+
+# Stage 6 — JWT 插件独立 JAR
+
+**工程名：** `gateway-jwt-plugin-jar`  
+**提交：** 待提交 · 2026-07-10  
+**一句话：** JWT 认证从 gateway-core 剥离，打成独立 JAR，启动时通过 SPI 静态加载。
+
+---
+
+## 学习目标
+
+1. 理解「插件 = 独立 artifact + SPI 注册」的打包模型
+2. 使用 Java `ServiceLoader` 发现 `AuthPlugin` 实现
+3. 使用 `URLClassLoader` 隔离插件与网关主程序
+4. 理解 Maven 构建时如何把插件 JAR 复制到 `plugins/` 目录
+
+---
+
+## 为什么要做这个 Stage
+
+Stage 5 的 `JwtAuthPlugin` 仍编译在 `gateway-core` 里——改认证逻辑仍要重新打网关 fat JAR。  
+Stage 6 把 JWT 验签（含 JWKS 拉取）整体迁入 `plugin-jwt` 模块，网关只负责**加载和调用**，为 Stage 7~8 的热部署铺路。
+
+```
+Stage 5:  gateway-core.jar 内含 JwtAuthPlugin
+Stage 6:  gateway-core.jar + plugins/plugin-jwt-*.jar
+Stage 8:  运行中替换 plugins/ 下的 JAR，无需重启
+```
+
+---
+
+## 核心变更
+
+### 新模块 `plugin-jwt`（仅依赖 gateway-api + nimbus-jose-jwt）
+
+| 类 | 作用 |
+|----|------|
+| `JwtAuthPlugin` | SPI 实现，插件入口 |
+| `PluginJwtValidator` | RS256 验签 + iss/aud/exp |
+| `PluginJwksKeyProvider` | JDK HttpClient 拉取 JWKS |
+| `META-INF/services/...AuthPlugin` | Java SPI 注册文件 |
+
+### gateway-core 重构
+
+| 组件 | 作用 |
+|------|------|
+| `StaticPluginLoader` | 扫描 `plugins/`，URLClassLoader + ServiceLoader |
+| `GatewayPluginProperties` | `gateway.plugins.directory` 配置 |
+| `AuthPluginManager` | 启动时加载插件 JAR 并 init |
+| 移除 | core 内 `JwtAuthPlugin`、`JwksKeyProvider`、`LocalJwtValidator`、`JwksRefreshScheduler` |
+
+### 调用链（Stage 6）
+
+```
+启动 → StaticPluginLoader 加载 plugins/plugin-jwt-*.jar
+     → ServiceLoader 发现 JwtAuthPlugin
+     → plugin.init(SpringPluginContext)
+请求 → AuthPluginGlobalFilter → plugin.authenticate()
+```
+
+**配置：**
+
+```yaml
+gateway:
+  plugins:
+    directory: plugins
+  auth:
+    jwt:
+      jwks-uri: http://localhost:8082/.well-known/jwks.json
+```
+
+---
+
+## 动手实验
+
+### 实验 1：确认插件 JAR 已生成
+
+```bash
+cd E:\MyGithub\api-gateway
+mvn clean package
+
+# 应存在插件 JAR 与网关旁的 plugins 目录
+dir gateway-core\target\plugins
+# → plugin-jwt-0.0.1-SNAPSHOT.jar
+```
+
+### 实验 2：三进程联调（认证行为与 Stage 5 一致）
+
+```bash
+# 终端 1 — Mock Auth
+java -jar mock-jwks-server/target/mock-jwks-server-0.0.1-SNAPSHOT.jar
+
+# 终端 2 — 模拟下游
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar
+
+# 终端 3 — 网关（mvn package 后可直接 java -jar，会自动找到 target/plugins）
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+```
+
+**观察启动日志：**
+
+```
+从目录 .../gateway-core/target/plugins 加载认证插件: plugin-jwt-0.0.1-SNAPSHOT.jar
+JWT 认证插件已初始化: jwt-auth v1.0.0
+```
+
+```bash
+# 获取 JWT
+curl -X POST http://localhost:8082/admin/issue-token
+
+# 无 Token → 401
+curl -i http://localhost:8080/api/hello
+
+# 合法 JWT → 200
+curl -i -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
+```
+
+### 实验 3：验证插件与 core 解耦
+
+```bash
+# 查看 plugin-jwt JAR 内容（不含 gateway-core 类）
+jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr JwtAuthPlugin
+jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr META-INF/services
+```
+
+### 思考题
+
+1. 为什么插件 ClassLoader 的 parent 是 `gateway-api` 而不是 `gateway-core`？
+2. Stage 7 的 PluginManager 会比 StaticPluginLoader 多做什么？
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | BUILD SUCCESS，含 plugin-jwt 测试 |
+| 2 | `gateway-core/target/plugins/` | 存在 `plugin-jwt-*.jar` |
+| 3 | 网关启动日志 | 加载 plugin-jwt + 插件 init 日志 |
+| 4 | 合法 JWT 经网关 | 200（与 Stage 5 行为一致） |
+| 5 | `plugin-jwt` 不依赖 `gateway-core` | pom 仅依赖 gateway-api |
+
+---
+
+## 变更记录
+
+| 类型 | 路径 |
+|------|------|
+| 新增 | `plugin-jwt/` 模块、`StaticPluginLoader`、`GatewayPluginProperties` |
+| 迁移 | JWT 验签逻辑从 core → plugin-jwt |
+| 删除 | core 内 `JwtAuthPlugin`、`JwksKeyProvider`、`LocalJwtValidator` 等 |
+| 修改 | `AuthPluginManager`、`gateway-core/pom.xml`（copy 插件 JAR）、`application.yml` |
+
+### Stage 5 → Stage 6 对比
+
+| 维度 | Stage 5 | Stage 6 |
+|------|---------|---------|
+| JwtAuthPlugin 位置 | gateway-core | plugin-jwt JAR |
+| 加载方式 | Spring `@Component` 注入 | URLClassLoader + SPI |
+| JWKS 拉取 | core 内 WebClient | 插件内 JDK HttpClient |
+| 改认证逻辑 | 需重打 gateway-core | 只需重打 plugin-jwt |
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| 独立 JAR | 插件是 artifact，不是 core 里的一个类 |
+| SPI | `META-INF/services` + ServiceLoader 发现实现 |
+| ClassLoader | 插件与 core 类隔离，共享 gateway-api 契约 |
+| plugins/ | Maven 构建时复制，运行时加载 |
+| Stage 6 不做 | 热部署、Admin API——Stage 7~9 |
+
+**下一课预告（Stage 7）：** PluginManager 统一管理插件生命周期与冷加载。
 
 ---
 
@@ -1091,6 +1384,8 @@ curl -X DELETE http://localhost:8082/admin/keys/dev-key-1
 | 6 | `ae9fe90` | RSA 密钥对生成工具 | 工具 |
 | 7 | `7ae0e87` | JWKS 远端拉取 + mock-jwks-server | 4 |
 | 8 | `16adc84` | AuthPlugin SPI 接口层 | 5 |
+| 9 | `5643fb6` | mock-jwks 多钥并存轮换 | 4 改进 |
+| 10 | 待提交 | plugin-jwt 独立 JAR + 静态加载 | 6 |
 
 ## 后续课程预告
 

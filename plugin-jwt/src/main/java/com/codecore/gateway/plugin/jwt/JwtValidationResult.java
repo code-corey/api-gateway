@@ -1,4 +1,4 @@
-package com.codecore.gateway.auth;
+package com.codecore.gateway.plugin.jwt;
 
 /**
  * JWT 校验结果。

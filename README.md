@@ -522,7 +522,7 @@ Stage 0 ──▶ Stage 1 ──▶ Stage 2 ──▶ ... ──▶ Stage 12
 | 3 | `gateway-with-static-jwt` | 能验 JWT | RS256 本地公钥 | ✅ 已完成 |
 | 4 | `gateway-with-jwks` | 能从远端拉公钥 | JWKS 缓存 | ✅ 已完成 |
 | 5 | `gateway-plugin-api` | 认证逻辑有接口 | `AuthPlugin` SPI | ✅ 已完成 |
-| 6 | `gateway-jwt-plugin-jar` | JWT 变独立 JAR | `plugin-jwt` 模块 | ⏳ 待开发 |
+| 6 | `gateway-jwt-plugin-jar` | JWT 变独立 JAR | `plugin-jwt` 模块 | ✅ 已完成 |
 | 7 | `gateway-plugin-manager-cold` | 启动时加载插件 | PluginManager | ⏳ 待开发 |
 | 8 | `gateway-plugin-hotdeploy-single` | 不重启换插件 | 热部署核心 | ⏳ 待开发 |
 | 9 | `gateway-admin-api-single` | HTTP 上传插件 | Admin API | ⏳ 待开发 |
@@ -730,7 +730,8 @@ git merge stage/08-hotdeploy-single
 | Stage 3 JWT 本地公钥验签 | ✅ 已完成 |
 | Stage 4 JWKS 远端拉取 | ✅ 已完成 |
 | Stage 5 插件 SPI 接口 | ✅ 已完成 |
-| Stage 6 ~ 12 | ⏳ 待开发 |
+| Stage 6 JWT 独立 JAR 插件 | ✅ 已完成 |
+| Stage 7 ~ 12 | ⏳ 待开发 |
 | CI/CD | ⏳ 待开发 |
 | 部署配置 | ⏳ 待开发 |
 

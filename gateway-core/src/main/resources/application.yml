@@ -15,6 +15,8 @@ spring:
             - StripPrefix=1
 
 gateway:
+  plugins:
+    directory: plugins
   auth:
     enabled: true
     exclude-paths:

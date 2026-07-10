@@ -21,6 +21,7 @@
 
     <modules>
         <module>gateway-api</module>
+        <module>plugin-jwt</module>
         <module>gateway-core</module>
         <module>mock-backend</module>
         <module>mock-jwks-server</module>
@@ -49,6 +50,11 @@
             <dependency>
                 <groupId>com.codecore</groupId>
                 <artifactId>gateway-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.codecore</groupId>
+                <artifactId>plugin-jwt</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
