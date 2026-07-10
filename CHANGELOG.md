@@ -45,7 +45,7 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 3 | `gateway-with-static-jwt` | RS256 本地公钥 JWT | `863a027` | ✅ |
 | 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
 | 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | `16adc84` | ✅ |
-| 6 | `gateway-jwt-plugin-jar` | JWT 独立 JAR + 静态加载 | 待提交 | ✅ |
+| 6 | `gateway-jwt-plugin-jar` | JWT 独立 JAR + 静态加载 | `5b57fd3` | ✅ |
 | 7 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
@@ -1196,7 +1196,7 @@ curl -i -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
 # Stage 6 — JWT 插件独立 JAR
 
 **工程名：** `gateway-jwt-plugin-jar`  
-**提交：** 待提交 · 2026-07-10  
+**提交：** `5b57fd3` · 2026-07-10  
 **一句话：** JWT 认证从 gateway-core 剥离，打成独立 JAR，启动时通过 SPI 静态加载。
 
 ---
@@ -1385,7 +1385,7 @@ jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr META-INF/servic
 | 7 | `7ae0e87` | JWKS 远端拉取 + mock-jwks-server | 4 |
 | 8 | `16adc84` | AuthPlugin SPI 接口层 | 5 |
 | 9 | `5643fb6` | mock-jwks 多钥并存轮换 | 4 改进 |
-| 10 | 待提交 | plugin-jwt 独立 JAR + 静态加载 | 6 |
+| 10 | `5b57fd3` | plugin-jwt 独立 JAR + 静态加载 | 6 |
 
 ## 后续课程预告
 
