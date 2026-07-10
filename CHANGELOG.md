@@ -973,12 +973,30 @@ java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar         # :8080
 curl -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
 ```
 
-**密钥轮换演示：**
+**密钥轮换演示（多钥并存，贴近生产）：**
 
 ```bash
+# 1. 用 JwtDevTokenPrinter 或旧方式拿到 kid=dev-key-1 的 JWT（OLD_TOKEN）
+# 2. 查看 JWKS 中的 kid 列表
+curl http://localhost:8082/admin/keys
+
+# 3. 轮换：追加新钥，旧钥 dev-key-1 仍保留
 curl -X POST http://localhost:8082/admin/rotate-key
-# 等待网关 JWKS 刷新后，旧 kid 的 JWT 将验签失败
+
+# 4. 触发网关刷新 JWKS（或等待定时刷新 / 用新 kid 请求触发 refresh）
+curl http://localhost:8080/api/hello -H "Authorization: Bearer <OLD_TOKEN>"
+# → 仍应通过（kid=dev-key-1 的公钥仍在 JWKS 中）
+
+# 5. 用新钥签发 Token
+curl -X POST http://localhost:8082/admin/issue-token
+# → 返回 kid=rotated-key-xxx 的新 JWT
+
+# 6. 重叠窗口结束：撤销旧钥（模拟生产清理）
+curl -X DELETE http://localhost:8082/admin/keys/dev-key-1
+# → 此后 OLD_TOKEN 将因 JWKS 中无 dev-key-1 而验签失败
 ```
+
+> **要点：** 网关按 JWT Header 的 `kid` 在 JWKS **集合**中选公钥，不是使用「最新一把钥」。轮换时 Auth 应 **追加** 新公钥，旧 Token 在 `exp` 内仍可验签。
 
 ---
 
@@ -986,9 +1004,10 @@ curl -X POST http://localhost:8082/admin/rotate-key
 
 | 要点 | 记住这句话 |
 |------|------------|
-| JWKS | Auth 服务公布「当前有效公钥集合」的标准格式 |
-| kid | JWT Header 里的密钥 ID，用来选哪把公钥验签 |
-| 定时刷新 | 支持密钥轮换，不必重启网关 |
+| JWKS | Auth 公布「有效公钥集合」，轮换时可多钥并存 |
+| kid | 按 Token Header 的 kid 选公钥，不是取「最新钥」 |
+| 轮换 | 追加新钥 + 保留旧钥；旧 JWT 在 exp 内仍可验 |
+| 撤销 | 重叠窗口后再从 JWKS 移除旧 kid |
 | Stage 4 不做 | 插件化——Stage 5 开始 |
 
 **下一课预告（Stage 5）：** 把认证逻辑抽成 `AuthPlugin` 接口。
