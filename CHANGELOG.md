@@ -1265,6 +1265,247 @@ gateway:
 
 ---
 
+## 深入理解：`ServiceLoader` 与 Java SPI
+
+Stage 6 的核心一行代码是：
+
+```java
+URLClassLoader pluginClassLoader = createPluginClassLoader(pluginJar);
+ServiceLoader<AuthPlugin> serviceLoader = ServiceLoader.load(AuthPlugin.class, pluginClassLoader);
+AuthPlugin plugin = serviceLoader.findFirst()
+        .orElseThrow(() -> new IllegalStateException("插件 JAR 中未找到 AuthPlugin SPI 实现"));
+```
+
+下面按「是什么 → 怎么发现 → 怎么实例化 → 和 ClassLoader 的关系 → 本项目的完整链路」讲清楚。
+
+### 1. SPI 是什么
+
+**SPI（Service Provider Interface，服务提供者接口）** 是 JDK 内置的一种**插件发现机制**：
+
+| 角色 | 在本项目里是谁 | 职责 |
+|------|----------------|------|
+| **SPI 接口** | `gateway-api` 里的 `AuthPlugin` | 定义「网关需要插件提供什么能力」 |
+| **Provider（实现方）** | `plugin-jwt` 里的 `JwtAuthPlugin` | 实现接口，打包进独立 JAR |
+| **Consumer（调用方）** | `gateway-core` 里的 `StaticPluginLoader` | 运行时找到实现类并调用 |
+
+和 Spring `@Autowired` 的区别：
+
+| | Spring 注入 | Java SPI |
+|--|-------------|----------|
+| 发现时机 | 启动扫描 classpath 上的 `@Component` | 读取 JAR 内 `META-INF/services/` 文件 |
+| 实现类位置 | 通常和主程序打在同一 JAR | **可以在独立 JAR**，运行时再加进来 |
+| 是否依赖 Spring | 是 | **否**（纯 JDK） |
+
+Stage 6 选 SPI，是因为 Stage 8 要在**不重启**的情况下换 JAR——实现类不能写死在 gateway-core 的 classpath 里。
+
+### 2. 注册文件：`META-INF/services/<接口全限定名>`
+
+插件 JAR 里必须有一个文本文件，路径**固定**：
+
+```
+plugin-jwt-0.0.1-SNAPSHOT.jar
+└── META-INF/
+    └── services/
+        └── com.codecore.gateway.plugin.AuthPlugin   ← 文件名 = 接口全限定名
+```
+
+文件内容：**一行一个实现类的全限定名**（本项目只有一行）：
+
+```
+com.codecore.gateway.plugin.jwt.JwtAuthPlugin
+```
+
+规则要点：
+
+| 规则 | 说明 |
+|------|------|
+| 文件名 | 必须是接口的**完整类名**，不能写错一个字母 |
+| 文件内容 | 实现类的**完整类名**；多个实现就写多行 |
+| 注释 | 不支持 `#` 注释，写了会被当成类名解析失败 |
+| 打包 | 必须在 `src/main/resources/META-INF/services/` 下，Maven 才会打进 JAR |
+
+可以用下面命令亲自验证：
+
+```bash
+jar xf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar META-INF/services/com.codecore.gateway.plugin.AuthPlugin
+type META-INF\services\com.codecore.gateway.plugin.AuthPlugin
+```
+
+### 3. `ServiceLoader.load` 两个参数分别做什么
+
+```java
+ServiceLoader.load(AuthPlugin.class, pluginClassLoader);
+//              ──────── SPI 接口 ────────  ───── 用哪个 ClassLoader ─────
+```
+
+#### 参数 1：`AuthPlugin.class`
+
+告诉 `ServiceLoader`：
+
+1. 去 ClassLoader 可见的 classpath 里找 `META-INF/services/com.codecore.gateway.plugin.AuthPlugin`
+2. 读出里面的实现类名（如 `com.codecore.gateway.plugin.jwt.JwtAuthPlugin`）
+3. 返回的类型是 `ServiceLoader<AuthPlugin>`，实例化出来的对象可当作 `AuthPlugin` 使用
+
+#### 参数 2：`pluginClassLoader`（关键）
+
+**必须传入插件专用的 ClassLoader**，不能省略。
+
+若写成：
+
+```java
+ServiceLoader.load(AuthPlugin.class);  // 使用当前线程的 Context ClassLoader
+```
+
+则 `ServiceLoader` 会在 **gateway-core 的 classpath** 里找注册文件——而 `JwtAuthPlugin` 在 `plugin-jwt` 独立 JAR 里，**找不到**，启动直接失败。
+
+传入 `pluginClassLoader` 的效果：
+
+```
+ServiceLoader 读注册文件  → 从 plugin-jwt.jar 里读 META-INF/services/...
+ServiceLoader 加载实现类  → 用 pluginClassLoader 加载 JwtAuthPlugin.class
+ServiceLoader 实例化      → new JwtAuthPlugin()（通过无参构造器）
+```
+
+### 4. `ServiceLoader` 内部加载流程（逐步）
+
+结合 `StaticPluginLoader` 源码，启动时实际发生：
+
+```
+① findJwtPluginJar()
+   扫描 plugins/ 目录 → 找到 plugin-jwt-0.0.1-SNAPSHOT.jar
+
+② createPluginClassLoader(pluginJar)
+   new URLClassLoader([plugin-jwt.jar 的 URL], parent = AuthPlugin 的 ClassLoader)
+
+③ ServiceLoader.load(AuthPlugin.class, pluginClassLoader)
+   3a. 在 plugin-jwt.jar 内打开
+       META-INF/services/com.codecore.gateway.plugin.AuthPlugin
+   3b. 读到一行：com.codecore.gateway.plugin.jwt.JwtAuthPlugin
+   3c. 调用 pluginClassLoader.loadClass("...JwtAuthPlugin")
+   3d. 缓存 Provider 信息（此时通常还未 new 实例）
+
+④ serviceLoader.findFirst()
+   4a. 取第一个 Provider
+   4b. 调用 provider.get() → 反射执行 new JwtAuthPlugin()
+   4c. 返回 AuthPlugin 实例
+
+⑤ plugin.init(pluginContext)
+   网关把配置、日志能力注入插件
+```
+
+用图表示：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ gateway-core（Consumer）                                         │
+│                                                                 │
+│  StaticPluginLoader.loadAndInit()                               │
+│       │                                                         │
+│       ▼                                                         │
+│  URLClassLoader ──────────────► plugin-jwt.jar                  │
+│  parent = gateway-api CL              │                         │
+│                                       ├── META-INF/services/    │
+│                                       │   └── AuthPlugin 注册文件│
+│                                       ├── JwtAuthPlugin.class   │
+│                                       ├── PluginJwtValidator    │
+│                                       └── nimbus-jose-jwt...    │
+│       │                                                         │
+│       ▼                                                         │
+│  ServiceLoader.load(AuthPlugin.class, pluginClassLoader)        │
+│       │  读注册文件 → loadClass → new JwtAuthPlugin()           │
+│       ▼                                                         │
+│  AuthPlugin plugin  ──init()──►  SpringPluginContext            │
+└─────────────────────────────────────────────────────────────────┘
+         ▲
+         │ 共享接口类型（同一份 class 对象）
+         │
+┌────────┴────────┐
+│  gateway-api    │  ← AuthPlugin、AuthRequest、AuthResult 接口
+│  （SPI 契约）    │     parent ClassLoader 指向这里
+└─────────────────┘
+```
+
+### 5. 为什么要配 `URLClassLoader`，且 parent 是 `gateway-api`
+
+```java
+ClassLoader parent = AuthPlugin.class.getClassLoader();  // gateway-api 的 ClassLoader
+return new URLClassLoader(new URL[]{jarUrl}, parent);
+```
+
+**ClassLoader 双亲委派**（简化版）：
+
+```
+pluginClassLoader 加载某个类
+  → 先问 parent（gateway-api CL）能不能加载
+  → parent 能加载（如 AuthPlugin 接口）→ 直接用 parent 的版本
+  → parent 不能加载（如 JwtAuthPlugin 实现）→ 自己从 plugin-jwt.jar 加载
+```
+
+这样设计的原因：
+
+| 设计 | 原因 |
+|------|------|
+| parent = `gateway-api` | 接口 `AuthPlugin` 在 parent 里只有**一份**；网关和插件用的是**同一个** `AuthPlugin.class`，`instanceof`、方法调用才正常 |
+| parent ≠ `gateway-core` | 插件不应看见 core 内部类（Filter、Manager 等），减少耦合和类冲突 |
+| 独立 `URLClassLoader` | 插件实现类、nimbus-jose-jwt 等从插件 JAR 加载；换插件 JAR = 换 ClassLoader（Stage 8 热部署的基础） |
+
+若 parent 设错（例如 `null` 或 core 的 AppClassLoader），可能出现：
+
+- `ClassCastException`：两个 ClassLoader 各加载了一份 `AuthPlugin`，同名但不是同一个 Class
+- 插件看不见 SPI 接口，或网关 cast 插件实例失败
+
+### 6. `findFirst()` 与懒加载
+
+```java
+AuthPlugin plugin = serviceLoader.findFirst().orElseThrow(...);
+```
+
+| API | 行为 |
+|-----|------|
+| `ServiceLoader.load(...)` | 只**解析**注册文件，列出 Provider，一般不立刻 new 对象 |
+| `.iterator()` / `.forEach()` | 遍历时对每个 Provider 调用 `get()`，**此时才实例化** |
+| `.findFirst()` | 取第一个 Provider 并 `get()`，只实例化**一个**实现 |
+
+本项目 Stage 6 约定：**一个 plugins 目录里只有一个 JWT 插件 JAR、一个实现类**，所以 `findFirst()` 足够。  
+Stage 7 若支持多插件，会改用遍历 + 按 `metadata().name()` 选择。
+
+实现类要求：
+
+- 必须有一个** public 无参构造器**（默认就有，除非你自己删掉）
+- 不要写成 Spring `@Component`——实例由 `ServiceLoader` 创建，不是 Spring 容器
+
+### 7. 和 Stage 5 的对比（帮助记忆）
+
+| 步骤 | Stage 5 | Stage 6 |
+|------|---------|---------|
+| 谁创建 `JwtAuthPlugin` | Spring 容器（`@Component`） | `ServiceLoader`（反射 `new`） |
+| 谁找到实现类 | `@ComponentScan` | `META-INF/services` + `ServiceLoader` |
+| 实现类在哪 | gateway-core 模块内 | plugin-jwt 独立 JAR |
+| 怎么换实现 | 改代码、重打 core | 换 plugins 下的 JAR（Stage 8 无需重启） |
+
+### 8. 常见错误排查
+
+| 现象 | 可能原因 |
+|------|----------|
+| `插件 JAR 中未找到 AuthPlugin SPI 实现` | JAR 里没有 `META-INF/services/com.codecore.gateway.plugin.AuthPlugin`，或文件名拼错 |
+| `ServiceConfigurationError` | 注册文件里的类名写错，或实现类没有 public 无参构造器 |
+| `ClassCastException: JwtAuthPlugin cannot be cast to AuthPlugin` | 没用插件 ClassLoader，或 parent ClassLoader 配错，接口被加载了两份 |
+| `NoClassDefFoundError: nimbus...` | plugin-jwt 没把依赖打进 JAR，且运行时 classpath 也没有 nimbus（Stage 6 插件 JAR 需自带依赖或后续用 fat jar） |
+
+> **说明：** 当前 `plugin-jwt` 是普通 JAR，nimbus-jose-jwt 在插件 JAR 内；gateway-core 的 `URLClassLoader` 只加载 plugin-jwt 这一个 URL。若 nimbus 不在 plugin-jwt.jar 里，需要在 Stage 7 考虑 **shaded/fat plugin jar** 或扩展 ClassLoader 的 URL 列表。
+
+### 9. 小结（背这几句就够）
+
+| 要点 | 一句话 |
+|------|--------|
+| SPI 注册 | `META-INF/services/接口全名` 文件里写实现类全名 |
+| `load(接口, ClassLoader)` | 第二个参数决定**从哪个 JAR**读注册文件、**用谁**加载实现类 |
+| `URLClassLoader` | 把 plugin-jwt.jar 挂进 JVM；parent 指向 gateway-api 保证接口只有一份 |
+| `findFirst()` | 实例化第一个 Provider，得到 `AuthPlugin` 供网关调用 |
+| 为何不用 Spring 扫描 | 实现类在运行时 JAR 里，不在 core 的编译 classpath 上 |
+
+---
+
 ## 动手实验
 
 ### 实验 1：确认插件 JAR 已生成
@@ -1317,10 +1558,28 @@ jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr JwtAuthPlugin
 jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr META-INF/services
 ```
 
+### 实验 4：亲手走一遍 SPI 发现过程
+
+```bash
+# 1. 解出 SPI 注册文件，确认内容与接口名一致
+cd E:\MyGithub\api-gateway
+jar xf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar META-INF/services/com.codecore.gateway.plugin.AuthPlugin
+type META-INF\services\com.codecore.gateway.plugin.AuthPlugin
+# 期望输出：com.codecore.gateway.plugin.jwt.JwtAuthPlugin
+
+# 2. 启动网关，在日志里定位两行（对应 ServiceLoader 成功）
+#    - StaticPluginLoader: 从目录 ... 加载认证插件: plugin-jwt-....jar
+#    - SpringPluginContext: JWT 认证插件已初始化: jwt-auth v1.0.0
+# 第二行来自 plugin.init()，说明 findFirst().get() 已成功 new 出 JwtAuthPlugin
+
+# 3.（可选）故意改坏注册文件再打包，观察 ServiceConfigurationError / 找不到实现
+```
+
 ### 思考题
 
 1. 为什么插件 ClassLoader 的 parent 是 `gateway-api` 而不是 `gateway-core`？
 2. Stage 7 的 PluginManager 会比 StaticPluginLoader 多做什么？
+3. 若 `META-INF/services/com.codecore.gateway.plugin.AuthPlugin` 里写两行实现类，`findFirst()` 会加载哪一个？
 
 ---
 
@@ -1361,8 +1620,9 @@ jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr META-INF/servic
 | 要点 | 记住这句话 |
 |------|------------|
 | 独立 JAR | 插件是 artifact，不是 core 里的一个类 |
-| SPI | `META-INF/services` + ServiceLoader 发现实现 |
-| ClassLoader | 插件与 core 类隔离，共享 gateway-api 契约 |
+| SPI 注册 | `META-INF/services/接口全名` → 实现类全名 |
+| ServiceLoader | `load(接口, 插件ClassLoader)` 读注册文件并实例化 Provider |
+| ClassLoader | parent=gateway-api，保证 SPI 接口只有一份 |
 | plugins/ | Maven 构建时复制，运行时加载 |
 | Stage 6 不做 | 热部署、Admin API——Stage 7~9 |
 
