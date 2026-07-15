@@ -1634,7 +1634,7 @@ type META-INF\services\com.codecore.gateway.plugin.AuthPlugin
 # Stage 7 — 冷加载插件管理器
 
 **工程名：** `gateway-plugin-manager-cold`  
-**提交：** 待提交 · 2026-07-15  
+**提交：** `12c29c8` · 2026-07-15  
 **一句话：** 用 `PluginClassLoader` + `AuthPluginManager` 统一扫描、发现、激活、销毁插件——仍需重启，但生命周期已完整。
 
 ---
@@ -1821,7 +1821,7 @@ jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr META-INF/servic
 | 8 | `16adc84` | AuthPlugin SPI 接口层 | 5 |
 | 9 | `5643fb6` | mock-jwks 多钥并存轮换 | 4 改进 |
 | 10 | `5b57fd3` | plugin-jwt 独立 JAR + 静态加载 | 6 |
-| 11 | 待提交 | PluginClassLoader + 冷加载 Manager | 7 |
+| 11 | `12c29c8` | PluginClassLoader + 冷加载 Manager | 7 |
 
 ## 后续课程预告
 
