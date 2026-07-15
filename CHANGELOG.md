@@ -46,7 +46,7 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
 | 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | `16adc84` | ✅ |
 | 6 | `gateway-jwt-plugin-jar` | JWT 独立 JAR + 静态加载 | `5b57fd3` | ✅ |
-| 7 | `gateway-plugin-manager-cold` | PluginClassLoader + 冷加载 Manager | 待提交 | ✅ |
+| 7 | `gateway-plugin-manager-cold` | PluginClassLoader + 冷加载 Manager | `12c29c8` | ✅ |
 | 8 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
