@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 网关插件加载配置。
  * <p>
- * Stage 6 起从 plugins 目录静态加载认证插件 JAR。
+ * Stage 7 起支持扫描 plugins 目录，并按 {@code active} 名称激活指定认证插件。
  * </p>
  */
 @ConfigurationProperties(prefix = "gateway.plugins")
@@ -16,11 +16,36 @@ public class GatewayPluginProperties {
      */
     private String directory = "plugins";
 
+    /**
+     * 启动时激活的插件名称，须与 {@link PluginMetadata#name()} 一致。
+     */
+    private String active = "jwt-auth";
+
+    /**
+     * @return 插件目录配置。
+     */
     public String getDirectory() {
         return directory;
     }
 
+    /**
+     * @param directory 插件目录。
+     */
     public void setDirectory(String directory) {
         this.directory = directory;
+    }
+
+    /**
+     * @return 激活插件名称。
+     */
+    public String getActive() {
+        return active;
+    }
+
+    /**
+     * @param active 激活插件名称。
+     */
+    public void setActive(String active) {
+        this.active = active;
     }
 }

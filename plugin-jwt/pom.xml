@@ -56,6 +56,42 @@
                     </archive>
                 </configuration>
             </plugin>
+            <!-- Stage 7：将 nimbus 等依赖打进插件 JAR，独立 ClassLoader 可自包含加载 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.3</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>com.codecore:gateway-api</exclude>
+                                    <exclude>org.slf4j:slf4j-api</exclude>
+                                    <exclude>org.junit.jupiter:*</exclude>
+                                    <exclude>org.wiremock:*</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

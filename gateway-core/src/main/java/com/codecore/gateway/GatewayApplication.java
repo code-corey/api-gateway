@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 /**
  * API 网关主应用入口。
  * <p>
- * Stage 6 在 Stage 5 基础上将 JWT 认证插件独立打包为 plugin-jwt JAR，启动时从 plugins 目录静态加载。
+ * Stage 7 通过 AuthPluginManager 冷加载 plugins 目录中的认证插件 JAR（PluginClassLoader + SPI）。
  * </p>
  */
 @SpringBootApplication

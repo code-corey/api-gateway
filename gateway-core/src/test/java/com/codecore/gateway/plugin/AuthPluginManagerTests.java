@@ -32,6 +32,12 @@ class AuthPluginManagerTests {
     }
 
     @Test
+    void shouldDiscoverJwtPluginInPluginsDirectory() {
+        assertTrue(authPluginManager.listDiscoveredMetadata().stream()
+                .anyMatch(meta -> "jwt-auth".equals(meta.name())));
+    }
+
+    @Test
     void shouldAuthenticateViaPlugin() throws Exception {
         String token = com.codecore.gateway.auth.JwtTestTokenHelper.validToken();
         AuthRequest request = AuthRequest.of("/api/hello", "GET");

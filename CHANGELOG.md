@@ -46,7 +46,8 @@ Stage 12 生产级网关        ← 插件热部署 + 集群（待学）
 | 4 | `gateway-with-jwks` | JWKS 远端拉取 + kid 匹配 | `7ae0e87` | ✅ |
 | 5 | `gateway-plugin-api` | AuthPlugin SPI 接口契约 | `16adc84` | ✅ |
 | 6 | `gateway-jwt-plugin-jar` | JWT 独立 JAR + 静态加载 | `5b57fd3` | ✅ |
-| 7 ~ 12 | … | 见 README | — | ⏳ |
+| 7 | `gateway-plugin-manager-cold` | PluginClassLoader + 冷加载 Manager | 待提交 | ✅ |
+| 8 ~ 12 | … | 见 README | — | ⏳ |
 
 ---
 
@@ -1630,6 +1631,180 @@ type META-INF\services\com.codecore.gateway.plugin.AuthPlugin
 
 ---
 
+# Stage 7 — 冷加载插件管理器
+
+**工程名：** `gateway-plugin-manager-cold`  
+**提交：** 待提交 · 2026-07-15  
+**一句话：** 用 `PluginClassLoader` + `AuthPluginManager` 统一扫描、发现、激活、销毁插件——仍需重启，但生命周期已完整。
+
+---
+
+## 学习目标
+
+1. 理解冷加载（Cold Load）与热部署（Hot Deploy）的区别
+2. 实现专用 `PluginClassLoader` 并正确设置 parent
+3. 用 Manager 统一：扫描 → SPI 发现 → 按名激活 → destroy/close
+4. 将 `plugin-jwt` 打成 shaded JAR，避免独立 ClassLoader 缺依赖
+
+---
+
+## 为什么要做这个 Stage
+
+Stage 6 的 `StaticPluginLoader` 写死找 `plugin-jwt*.jar`，职责散乱，关闭时也不释放 ClassLoader。  
+Stage 7 把加载逻辑收拢到 Manager，并抽出 `PluginClassLoader`，为 Stage 8「运行中换 JAR」铺平道路：
+
+```
+Stage 6:  硬编码找 plugin-jwt → ServiceLoader → init（无 destroy/close）
+Stage 7:  扫描全部 JAR → PluginClassLoader → 按 active 激活 → PreDestroy 清理
+Stage 8:  运行中再走一遍 load → 原子切换 current → destroy 旧插件
+```
+
+**冷加载**：进程启动时加载一次，改 JAR 需重启。  
+**热部署**：运行中替换，不重启（下一 Stage）。
+
+---
+
+## 核心变更
+
+| 组件 | 作用 |
+|------|------|
+| `PluginClassLoader` | 每 JAR 一个 URLClassLoader，parent=gateway-api，可 close |
+| `LoadedPlugin` | 绑定 plugin + ClassLoader + JAR 路径 |
+| `AuthPluginManager` | 扫描 / 发现 / 按 `active` 激活 / `@PreDestroy` 清理 |
+| 删除 `StaticPluginLoader` | 职责并入 Manager |
+| `plugin-jwt` shade | nimbus 打进插件 JAR，独立 ClassLoader 可运行 |
+
+**配置：**
+
+```yaml
+gateway:
+  plugins:
+    directory: plugins
+    active: jwt-auth   # 与 PluginMetadata.name() 一致
+```
+
+### 启动流程
+
+```
+AuthPluginManager 构造
+  → resolvePluginsDirectory()
+  → list *.jar
+  → 每个 JAR: new PluginClassLoader → ServiceLoader 发现 AuthPlugin
+  → 按 gateway.plugins.active 选中
+  → 关闭未选中 JAR 的 ClassLoader
+  → selected.init(context)
+  → Filter 经 getCurrentPlugin() 调用
+```
+
+### 关闭流程
+
+```
+@PreDestroy destroy()
+  → plugin.destroy()
+  → classLoader.close()   # 释放 Windows 上对 JAR 的文件锁
+```
+
+---
+
+## 动手实验
+
+### 实验 1：确认冷加载日志
+
+```bash
+cd E:\MyGithub\api-gateway
+mvn clean package
+
+java -jar mock-jwks-server/target/mock-jwks-server-0.0.1-SNAPSHOT.jar
+java -jar mock-backend/target/mock-backend-0.0.1-SNAPSHOT.jar
+java -jar gateway-core/target/gateway-core-0.0.1-SNAPSHOT.jar
+```
+
+**期望启动日志类似：**
+
+```
+扫描插件目录 .../target/plugins，共 1 个 JAR
+发现插件: jwt-auth v1.0.0 ← plugin-jwt-0.0.1-SNAPSHOT.jar
+认证插件已激活: jwt-auth v1.0.0（JAR: plugin-jwt-0.0.1-SNAPSHOT.jar）
+```
+
+```bash
+curl -X POST http://localhost:8082/admin/issue-token
+curl -i -H "Authorization: Bearer <JWT>" http://localhost:8080/api/hello
+```
+
+### 实验 2：错误的 active 名称
+
+临时把 `application.yml` 中 `gateway.plugins.active` 改成 `not-exist`，重启网关：
+
+```
+未找到名为 'not-exist' 的插件，已发现: jwt-auth
+```
+
+改回 `jwt-auth`。
+
+### 实验 3：观察 shaded JAR
+
+```bash
+# shaded 后 JAR 应包含 nimbus 包
+jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr nimbus
+jar tf plugin-jwt/target/plugin-jwt-0.0.1-SNAPSHOT.jar | findstr META-INF/services
+```
+
+### 思考题
+
+1. 为什么关闭时必须 `classLoader.close()`？（提示：Windows 文件锁、Stage 8 覆盖 JAR）
+2. 若 `plugins/` 里有两个不同 name 的插件 JAR，怎样切换激活的那个？
+3. Stage 8 热替换时，为什么要「先 init 新插件，再切换引用，最后 destroy 旧插件」？
+
+---
+
+## 验收清单
+
+| # | 检查项 | 通过标准 |
+|---|--------|----------|
+| 1 | `mvn clean package` | BUILD SUCCESS |
+| 2 | 启动日志 | 扫描 + 发现 + 激活 jwt-auth |
+| 3 | 合法 JWT | 200（行为与 Stage 6 一致） |
+| 4 | `listDiscoveredMetadata()` | 含 jwt-auth |
+| 5 | 进程退出 | 日志可见 ClassLoader 已关闭（可选观察） |
+
+---
+
+## 变更记录
+
+| 类型 | 路径 |
+|------|------|
+| 新增 | `PluginClassLoader`、`LoadedPlugin`、`PluginClassLoaderTests` |
+| 重写 | `AuthPluginManager`（冷加载全生命周期） |
+| 删除 | `StaticPluginLoader` |
+| 修改 | `GatewayPluginProperties`（+active）、`plugin-jwt` shade、`application.yml` |
+
+### Stage 6 → Stage 7 对比
+
+| 维度 | Stage 6 | Stage 7 |
+|------|---------|---------|
+| 加载器 | StaticPluginLoader（硬编码前缀） | AuthPluginManager 扫描全部 JAR |
+| ClassLoader | 裸 URLClassLoader | PluginClassLoader（可 close） |
+| 激活方式 | 固定第一个 SPI | `gateway.plugins.active` 按名 |
+| 生命周期 | 仅 init | init + @PreDestroy destroy/close |
+| 插件 JAR | 普通 JAR | shaded（含 nimbus） |
+
+---
+
+## 本课小结
+
+| 要点 | 记住这句话 |
+|------|------------|
+| 冷加载 | 启动时加载；改插件需重启 |
+| PluginClassLoader | 一 JAR 一 Loader，parent=api，可关闭 |
+| Manager | 扫描、发现、激活、销毁的唯一入口 |
+| active | 按 metadata.name 选择激活哪个插件 |
+| Stage 7 不做 | 运行中热替换——Stage 8 |
+
+**下一课预告（Stage 8）：** 不重启替换插件 JAR（热部署核心）。
+
+---
+
 # 附录
 
 ## Git 提交记录
@@ -1646,13 +1821,12 @@ type META-INF\services\com.codecore.gateway.plugin.AuthPlugin
 | 8 | `16adc84` | AuthPlugin SPI 接口层 | 5 |
 | 9 | `5643fb6` | mock-jwks 多钥并存轮换 | 4 改进 |
 | 10 | `5b57fd3` | plugin-jwt 独立 JAR + 静态加载 | 6 |
+| 11 | 待提交 | PluginClassLoader + 冷加载 Manager | 7 |
 
 ## 后续课程预告
 
 | Stage | 课题 | 你将学到 |
 |-------|------|----------|
-| 6 | 独立 JAR 插件 | plugin-jwt 模块打包 |
-| 5 ~ 7 | 插件体系 | SPI、ClassLoader、冷加载 |
 | 8 ~ 10 | 热部署 | 不重启换 JAR、Admin API、回滚 |
 | 11 ~ 12 | 生产化 | 集群同步、监控、安全 |
 

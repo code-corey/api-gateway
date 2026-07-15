@@ -17,6 +17,7 @@ spring:
 gateway:
   plugins:
     directory: plugins
+    active: jwt-auth
   auth:
     enabled: true
     exclude-paths:
